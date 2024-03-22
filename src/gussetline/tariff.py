@@ -200,8 +200,29 @@ class TariffStore:
             found = [f for f in found if f.booking_class == wanted]
         return sorted(found, key=lambda f: (f.amount.amount, f.fare_basis))
 
-    def cheapest(self, carrier: str, origin: str, destination: str, **filters) -> Fare:
-        found = self.search(carrier, origin, destination, **filters)
+    def cheapest(
+        self,
+        carrier: str,
+        origin: str,
+        destination: str,
+        *,
+        ticketing: date | None = None,
+        departure: date | None = None,
+        indicator: GlobalIndicator | None = None,
+        cabin: Cabin | None = None,
+        booking_class: str | None = None,
+    ) -> Fare:
+        """The cheapest fare that survives the filters, or a refusal saying so."""
+        found = self.search(
+            carrier,
+            origin,
+            destination,
+            ticketing=ticketing,
+            departure=departure,
+            indicator=indicator,
+            cabin=cabin,
+            booking_class=booking_class,
+        )
         if not found:
             raise NoFareFound(
                 "nothing published for this market",

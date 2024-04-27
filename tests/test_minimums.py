@@ -8,10 +8,18 @@ import pytest
 from conftest import segment
 from gussetline.components import FareComponent
 from gussetline.construction import price_component
+from gussetline.distance import MileageTable
 from gussetline.errors import NoFareFound
 from gussetline.exchange import Converter, RateTable
 from gussetline.indicators import GlobalIndicator
-from gussetline.minimums import MinimumResult, apply_hip, hip_check
+from gussetline.minimums import (
+    MinimumResult,
+    apply_hip,
+    apply_minimum,
+    backhaul_check,
+    highest_of,
+    hip_check,
+)
 from gussetline.money import Money
 from gussetline.tariff import Fare, OwRt, TariffStore
 from gussetline.trace import Stage, Trace
@@ -210,3 +218,104 @@ def test_applying_nothing_leaves_the_component_alone(converter):
         straight_through(), a_fare("FRA", "LAX", "500.00"), converter, TICKETING
     )
     assert apply_hip(priced, MinimumResult(Decimal(0), "no")) is priced
+
+
+@pytest.fixture
+def miles():
+    table = MileageTable()
+    table.add("FRA", "CHI", 4300)
+    table.add("FRA", "LAX", 5800)
+    table.add("FRA", "DEN", 5100)
+    table.add("CHI", "LAX", 1700)
+    return table
+
+
+def backtracking():
+    """Frankfurt to Chicago the long way, out past Los Angeles first."""
+    return FareComponent(
+        (
+            segment("LH", "456", "FRA", "LAX", "2025-03-04 10:00", "2025-03-04 13:20"),
+            segment("UA", "300", "LAX", "ORD", "2025-03-06 08:00", "2025-03-06 14:00"),
+        )
+    )
+
+
+def test_a_component_with_nothing_beyond_its_destination_has_no_backhaul(converter, miles):
+    store = TariffStore()
+    store.add(a_fare("FRA", "LAX", "500.00"))
+    priced = price_component(
+        component_via_chicago(), a_fare("FRA", "LAX", "500.00"), converter, TICKETING
+    )
+    trace = Trace()
+    result = backhaul_check(priced, store, converter, TICKETING, miles, trace)
+    assert not result.applied
+    assert "nothing is beyond the destination" in trace.for_stage(Stage.MINIMUM)[0].message
+
+
+def test_a_backtrack_to_a_dearer_point_is_charged(converter, miles):
+    store = TariffStore()
+    store.add(a_fare("FRA", "ORD", "500.00"))
+    store.add(a_fare("FRA", "LAX", "680.00"))
+    priced = price_component(backtracking(), a_fare("FRA", "ORD", "500.00"), converter, TICKETING)
+    result = backhaul_check(priced, store, converter, TICKETING, miles)
+    assert result.applied
+    assert result.added == Decimal("180.00")
+    assert result.pair == ("FRA", "LAX")
+
+
+def test_a_backtrack_to_a_cheaper_point_costs_nothing(converter, miles):
+    store = TariffStore()
+    store.add(a_fare("FRA", "ORD", "500.00"))
+    store.add(a_fare("FRA", "LAX", "420.00"))
+    priced = price_component(backtracking(), a_fare("FRA", "ORD", "500.00"), converter, TICKETING)
+    trace = Trace()
+    result = backhaul_check(priced, store, converter, TICKETING, miles, trace)
+    assert not result.applied
+    assert "backtrack found but no dearer fare" in trace.for_stage(Stage.MINIMUM)[0].message
+
+
+def test_the_backhaul_check_looks_at_connections_too(converter, miles):
+    # Los Angeles is flown through on a two hour connection and never named
+    # as a stopover, and the check still fires, which is what separates it
+    # from the higher intermediate point check.
+    store = TariffStore()
+    store.add(a_fare("FRA", "ORD", "500.00"))
+    store.add(a_fare("FRA", "LAX", "680.00"))
+    priced = price_component(backtracking(), a_fare("FRA", "ORD", "500.00"), converter, TICKETING)
+    hip = hip_check(priced, store, converter, TICKETING, ())
+    backhaul = backhaul_check(priced, store, converter, TICKETING, miles)
+    assert not hip.applied
+    assert backhaul.applied
+
+
+def test_the_backhaul_check_runs_after_pricing(converter, miles):
+    with pytest.raises(NoFareFound):
+        backhaul_check(backtracking(), TariffStore(), converter, TICKETING, miles)
+
+
+def test_the_two_checks_do_not_stack_and_the_dearer_one_wins():
+    hip = MinimumResult(Decimal("120.00"), "higher intermediate point", ("FRA", "CHI"))
+    backhaul = MinimumResult(Decimal("180.00"), "backhaul", ("FRA", "LAX"))
+    assert highest_of(hip, backhaul) is backhaul
+    assert highest_of(backhaul, hip) is backhaul
+
+
+def test_the_highest_of_nothing_is_nothing():
+    assert not highest_of().applied
+    assert not highest_of(MinimumResult(Decimal(0), "a"), MinimumResult(Decimal(0), "b")).applied
+
+
+def test_a_minimum_lands_under_the_label_it_was_given(converter):
+    priced = price_component(
+        straight_through(), a_fare("FRA", "LAX", "500.00"), converter, TICKETING
+    )
+    raised = apply_minimum(priced, MinimumResult(Decimal("40.00"), "backhaul"), "BHC")
+    assert raised.notes == ("BHC",)
+    assert raised.total_nuc == Decimal("540.00")
+
+
+def test_applying_a_finding_that_did_not_apply_changes_nothing(converter):
+    priced = price_component(
+        straight_through(), a_fare("FRA", "LAX", "500.00"), converter, TICKETING
+    )
+    assert apply_minimum(priced, MinimumResult(Decimal(0), "no"), "BHC") is priced

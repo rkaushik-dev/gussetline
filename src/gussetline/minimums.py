@@ -24,6 +24,7 @@ from datetime import date
 from decimal import Decimal
 
 from gussetline.components import FareComponent
+from gussetline.distance import MileageTable
 from gussetline.errors import NoFareFound
 from gussetline.exchange import Converter
 from gussetline.geography import city_of
@@ -157,3 +158,81 @@ def apply_hip(component: FareComponent, result: MinimumResult) -> FareComponent:
     if not result.applied:
         return component
     return component.with_surcharge(result.added, "HIP")
+
+
+def backhaul_check(
+    component: FareComponent,
+    store: TariffStore,
+    converter: Converter,
+    ticketing: date,
+    table: MileageTable,
+    trace: Trace | None = None,
+) -> MinimumResult:
+    """Charge for a journey that goes past its destination and comes back.
+
+    A component from Frankfurt to Chicago routed through Los Angeles is not
+    a Chicago journey with a detour, it is a Los Angeles journey that ends
+    short. The passenger has had the use of the Los Angeles sector and the
+    Chicago fare does not pay for it.
+
+    Two things separate this from the higher intermediate point check and
+    both matter. It looks at every ticketed point and not only the stopovers,
+    because a passenger who backtracked was carried past the point whether
+    they got off or not. And it only fires when the geometry says there was
+    a backtrack, which is a reading of the mileage table rather than of the
+    fares, so the two checks can disagree and often do.
+    """
+    if component.nuc is None or component.fare is None:
+        raise NoFareFound("a minimum check runs after the component is priced")
+
+    board, off = component.board_point, component.off_point
+    to_destination = table.tpm(board, off).miles
+    beyond = [
+        city_of(point)
+        for point in component.via_points
+        if table.tpm(board, city_of(point)).miles > to_destination
+    ]
+    if not beyond:
+        if trace is not None:
+            trace.note(Stage.MINIMUM, "nothing is beyond the destination, no backhaul")
+        return MinimumResult(Decimal(0), "no backhaul")
+
+    carrier = component.fare.carrier
+    departure = component.segments[0].departure.date()
+    highest = component.nuc
+    winner: tuple[str, str] | None = None
+    for point in beyond:
+        found = _fare_between(store, carrier, board, point, converter, ticketing, departure)
+        if found is not None and found > highest:
+            highest, winner = found, (board, point)
+
+    if winner is None:
+        if trace is not None:
+            trace.passed(Stage.MINIMUM, "backtrack found but no dearer fare beyond")
+        return MinimumResult(Decimal(0), "no backhaul")
+
+    added = highest - component.nuc
+    result = MinimumResult(added, "backhaul", winner, highest)
+    if trace is not None:
+        trace.passed(Stage.MINIMUM, str(result), pair=f"{winner[0]}-{winner[1]}", added=str(added))
+    return result
+
+
+def apply_minimum(component: FareComponent, result: MinimumResult, label: str) -> FareComponent:
+    """Put any minimum finding onto a component under its own label."""
+    if not result.applied:
+        return component
+    return component.with_surcharge(result.added, label)
+
+
+def highest_of(*results: MinimumResult) -> MinimumResult:
+    """The dearest of several checks, because they do not stack.
+
+    A component that fails both the higher intermediate point check and the
+    backhaul check is raised once, to whichever found more. Adding both would
+    charge twice for the same sector, which is the mistake this function
+    exists to make impossible at the call site.
+    """
+    if not results:
+        return NOTHING
+    return max(results, key=lambda r: r.added)

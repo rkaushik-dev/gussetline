@@ -23,12 +23,13 @@ from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
 
-from gussetline.components import FareComponent
+from gussetline.components import FareComponent, PricingUnit
 from gussetline.distance import MileageTable
 from gussetline.errors import NoFareFound
 from gussetline.exchange import Converter
 from gussetline.geography import city_of
-from gussetline.tariff import TariffStore
+from gussetline.itinerary import JourneyType
+from gussetline.tariff import OwRt, TariffStore
 from gussetline.trace import Stage, Trace
 
 
@@ -236,3 +237,115 @@ def highest_of(*results: MinimumResult) -> MinimumResult:
     if not results:
         return NOTHING
     return max(results, key=lambda r: r.added)
+
+
+def _round_trip_nuc(
+    store: TariffStore,
+    carrier: str,
+    origin: str,
+    destination: str,
+    converter: Converter,
+    ticketing: date,
+    departure: date,
+) -> Decimal | None:
+    """What a plain round trip between two points would have cost, in NUC.
+
+    A filed round trip half is doubled and a one way is taken as it stands,
+    because the comparison is against what the passenger could have bought
+    instead, and what they could have bought is a whole round trip.
+    """
+    try:
+        found = store.cheapest(
+            carrier, origin, destination, ticketing=ticketing, departure=departure
+        )
+    except NoFareFound:
+        return None
+    amount = converter.to_nuc(found.amount, ticketing)
+    if found.owrt is OwRt.ROUND_TRIP_HALF:
+        return amount * Decimal(2)
+    return amount
+
+
+def circle_trip_minimum(
+    unit: PricingUnit,
+    store: TariffStore,
+    converter: Converter,
+    ticketing: date,
+    trace: Trace | None = None,
+) -> MinimumResult:
+    """A circle trip may not undercut a round trip to any point on it.
+
+    Frankfurt to New York to Los Angeles and home is three components and can
+    add up to less than the Frankfurt to Los Angeles round trip, because the
+    three markets are priced independently. The passenger has been to Los
+    Angeles and back either way, so the round trip fare is the floor.
+    """
+    if unit.kind is not JourneyType.CIRCLE_TRIP:
+        return MinimumResult(Decimal(0), "not a circle trip")
+    if not unit.is_priced:
+        raise NoFareFound("a minimum check runs after the unit is priced")
+
+    first = unit.components[0]
+    assert first.fare is not None
+    carrier = first.fare.carrier
+    departure = first.segments[0].departure.date()
+    board = first.board_point
+
+    floor = unit.total_nuc
+    winner: tuple[str, str] | None = None
+    for component in unit.components:
+        point = component.off_point
+        if point == board:
+            continue
+        found = _round_trip_nuc(store, carrier, board, point, converter, ticketing, departure)
+        if found is not None and found > floor:
+            floor, winner = found, (board, point)
+
+    if winner is None:
+        if trace is not None:
+            trace.passed(Stage.MINIMUM, "circle trip clears every round trip on it")
+        return MinimumResult(Decimal(0), "no circle trip minimum")
+
+    added = floor - unit.total_nuc
+    result = MinimumResult(added, "circle trip minimum", winner, floor)
+    if trace is not None:
+        trace.passed(Stage.MINIMUM, str(result), pair=f"{winner[0]}-{winner[1]}", added=str(added))
+    return result
+
+
+def open_jaw_minimum(
+    unit: PricingUnit,
+    store: TariffStore,
+    converter: Converter,
+    ticketing: date,
+    trace: Trace | None = None,
+) -> MinimumResult:
+    """An open jaw may not undercut the round trip it is a variation of.
+
+    Out to New York and home to Munich instead of Frankfurt is a Frankfurt to
+    New York round trip with the last sector changed. It may cost more and it
+    frequently does, but it may not cost less, because the passenger would
+    then buy the open jaw and throw the ticket away at Munich.
+    """
+    if unit.kind is not JourneyType.OPEN_JAW:
+        return MinimumResult(Decimal(0), "not an open jaw")
+    if not unit.is_priced:
+        raise NoFareFound("a minimum check runs after the unit is priced")
+
+    first = unit.components[0]
+    assert first.fare is not None
+    carrier = first.fare.carrier
+    departure = first.segments[0].departure.date()
+    board, turn = first.board_point, first.off_point
+
+    floor = _round_trip_nuc(store, carrier, board, turn, converter, ticketing, departure)
+    if floor is None or floor <= unit.total_nuc:
+        if trace is not None:
+            trace.passed(Stage.MINIMUM, "open jaw clears the round trip it varies")
+        return MinimumResult(Decimal(0), "no open jaw minimum")
+
+    added = floor - unit.total_nuc
+    result = MinimumResult(added, "open jaw minimum", (board, turn), floor)
+    if trace is not None:
+        trace.passed(Stage.MINIMUM, str(result), pair=f"{board}-{turn}", added=str(added))
+    return result

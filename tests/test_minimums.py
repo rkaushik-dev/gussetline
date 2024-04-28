@@ -6,19 +6,26 @@ from decimal import Decimal
 import pytest
 
 from conftest import segment
-from gussetline.components import FareComponent
-from gussetline.construction import price_component
+from gussetline.components import FareComponent, PricingUnit
+from gussetline.construction import (
+    assemble_circle_trip,
+    assemble_round_trip,
+    price_component,
+)
 from gussetline.distance import MileageTable
 from gussetline.errors import NoFareFound
 from gussetline.exchange import Converter, RateTable
 from gussetline.indicators import GlobalIndicator
+from gussetline.itinerary import JourneyType
 from gussetline.minimums import (
     MinimumResult,
     apply_hip,
     apply_minimum,
     backhaul_check,
+    circle_trip_minimum,
     highest_of,
     hip_check,
+    open_jaw_minimum,
 )
 from gussetline.money import Money
 from gussetline.tariff import Fare, OwRt, TariffStore
@@ -319,3 +326,145 @@ def test_applying_a_finding_that_did_not_apply_changes_nothing(converter):
         straight_through(), a_fare("FRA", "LAX", "500.00"), converter, TICKETING
     )
     assert apply_minimum(priced, MinimumResult(Decimal(0), "no"), "BHC") is priced
+
+
+def leg(carrier, number, origin, destination, departure, arrival):
+    return FareComponent((segment(carrier, number, origin, destination, departure, arrival),))
+
+
+def circle(converter):
+    """Frankfurt to New York to Los Angeles and home, three components."""
+    parts = (
+        price_component(
+            leg("LH", "400", "FRA", "JFK", "2025-03-04 10:25", "2025-03-04 13:05"),
+            a_fare("FRA", "JFK", "300.00"),
+            converter,
+            TICKETING,
+        ),
+        price_component(
+            leg("AA", "100", "JFK", "LAX", "2025-03-08 08:00", "2025-03-08 11:15"),
+            a_fare("JFK", "LAX", "150.00"),
+            converter,
+            TICKETING,
+        ),
+        price_component(
+            leg("LH", "457", "LAX", "FRA", "2025-03-12 15:30", "2025-03-13 11:20"),
+            a_fare("LAX", "FRA", "350.00"),
+            converter,
+            TICKETING,
+        ),
+    )
+    return assemble_circle_trip(parts)
+
+
+def test_a_round_trip_unit_is_not_a_circle_trip_and_the_check_says_so(converter):
+    unit = assemble_round_trip(
+        price_component(
+            leg("LH", "400", "FRA", "JFK", "2025-03-04 10:25", "2025-03-04 13:05"),
+            a_fare("FRA", "JFK", "420.00"),
+            converter,
+            TICKETING,
+        ),
+        price_component(
+            leg("LH", "401", "JFK", "FRA", "2025-03-18 18:30", "2025-03-19 08:05"),
+            a_fare("JFK", "FRA", "420.00"),
+            converter,
+            TICKETING,
+        ),
+    )
+    result = circle_trip_minimum(unit, TariffStore(), converter, TICKETING)
+    assert not result.applied
+    assert result.reason == "not a circle trip"
+
+
+def test_a_circle_trip_that_clears_every_round_trip_is_left_alone(converter):
+    store = TariffStore()
+    store.add(a_fare("FRA", "JFK", "300.00"))
+    store.add(a_fare("FRA", "LAX", "350.00"))
+    trace = Trace()
+    result = circle_trip_minimum(circle(converter), store, converter, TICKETING, trace)
+    assert not result.applied
+    assert "clears every round trip" in trace.for_stage(Stage.MINIMUM)[0].message
+
+
+def test_a_circle_trip_that_undercuts_a_round_trip_is_raised_to_it(converter):
+    # The three components add to 800. A Frankfurt to Los Angeles round trip
+    # half is filed at 480, so the round trip is 960 and that is the floor.
+    store = TariffStore()
+    store.add(a_fare("FRA", "JFK", "300.00"))
+    store.add(a_fare("FRA", "LAX", "480.00"))
+    result = circle_trip_minimum(circle(converter), store, converter, TICKETING)
+    assert result.applied
+    assert result.added == Decimal("160.00")
+    assert result.pair == ("FRA", "LAX")
+
+
+def test_a_one_way_filing_is_not_doubled_for_the_comparison(converter):
+    store = TariffStore()
+    store.add(a_fare("FRA", "LAX", "480.00", owrt=OwRt.ONE_WAY_ONLY))
+    result = circle_trip_minimum(circle(converter), store, converter, TICKETING)
+    assert not result.applied
+
+
+def test_a_market_with_nothing_published_does_not_set_a_floor(converter):
+    result = circle_trip_minimum(circle(converter), TariffStore(), converter, TICKETING)
+    assert not result.applied
+
+
+def test_the_circle_trip_check_runs_after_the_unit_is_priced(converter):
+    unit = circle(converter)
+    unpriced = unit.replace(
+        0, leg("LH", "400", "FRA", "JFK", "2025-03-04 10:25", "2025-03-04 13:05")
+    )
+    with pytest.raises(NoFareFound):
+        circle_trip_minimum(unpriced, TariffStore(), converter, TICKETING)
+
+
+def open_jaw(converter):
+    """Out to New York, home to Munich instead of Frankfurt."""
+    parts = (
+        price_component(
+            leg("LH", "400", "FRA", "JFK", "2025-03-04 10:25", "2025-03-04 13:05"),
+            a_fare("FRA", "JFK", "300.00"),
+            converter,
+            TICKETING,
+        ),
+        price_component(
+            leg("LH", "417", "JFK", "MUC", "2025-03-18 18:30", "2025-03-19 08:05"),
+            a_fare("JFK", "MUC", "320.00"),
+            converter,
+            TICKETING,
+        ),
+    )
+    return PricingUnit(parts, JourneyType.OPEN_JAW)
+
+
+def test_a_round_trip_unit_is_not_an_open_jaw(converter):
+    result = open_jaw_minimum(circle(converter), TariffStore(), converter, TICKETING)
+    assert not result.applied
+    assert result.reason == "not an open jaw"
+
+
+def test_an_open_jaw_that_clears_its_round_trip_is_left_alone(converter):
+    store = TariffStore()
+    store.add(a_fare("FRA", "JFK", "300.00"))
+    trace = Trace()
+    result = open_jaw_minimum(open_jaw(converter), store, converter, TICKETING, trace)
+    assert not result.applied
+    assert "clears the round trip it varies" in trace.for_stage(Stage.MINIMUM)[0].message
+
+
+def test_an_open_jaw_that_undercuts_its_round_trip_is_raised(converter):
+    # The two components add to 620. The Frankfurt to New York round trip is
+    # 700, so the open jaw may not be sold for less than that.
+    store = TariffStore()
+    store.add(a_fare("FRA", "JFK", "350.00"))
+    result = open_jaw_minimum(open_jaw(converter), store, converter, TICKETING)
+    assert result.applied
+    assert result.added == Decimal("80.00")
+    assert result.pair == ("FRA", "NYC")
+
+
+def test_an_open_jaw_with_no_round_trip_filed_has_no_floor(converter):
+    result = open_jaw_minimum(open_jaw(converter), TariffStore(), converter, TICKETING)
+    assert not result.applied

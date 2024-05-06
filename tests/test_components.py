@@ -5,7 +5,7 @@ from decimal import Decimal
 import pytest
 
 from conftest import segment, surface
-from gussetline.components import FareComponent, PricingUnit, split_at
+from gussetline.components import Charge, FareComponent, PricingUnit, split_at
 from gussetline.errors import ConstructionError, ValidationError
 from gussetline.indicators import GlobalIndicator
 from gussetline.itinerary import JourneyType
@@ -237,3 +237,56 @@ def test_a_break_past_the_end_is_refused():
 def test_splitting_nothing_is_refused():
     with pytest.raises(ValidationError):
         split_at([], [])
+
+
+def test_a_charge_reads_back_as_its_reason_and_amount():
+    assert str(Charge("5M", Decimal("22.08"))) == "5M 22.08"
+
+
+def test_charges_are_kept_apart_and_the_total_still_adds_up():
+    c = (
+        FareComponent((out_sector(),))
+        .priced_with(a_fare(), Decimal("400.00"))
+        .with_surcharge(Decimal("20.00"), "5M")
+        .with_surcharge(Decimal("30.00"), "Q")
+    )
+    assert c.charges == (Charge("5M", Decimal("20.00")), Charge("Q", Decimal("30.00")))
+    assert c.surcharges == Decimal("50.00")
+    assert c.total_nuc == Decimal("450.00")
+
+
+def test_one_reason_can_be_read_back_on_its_own():
+    c = (
+        FareComponent((out_sector(),))
+        .priced_with(a_fare(), Decimal("400.00"))
+        .with_surcharge(Decimal("20.00"), "5M")
+        .with_surcharge(Decimal("30.00"), "Q")
+    )
+    assert c.charge_for("Q") == Decimal("30.00")
+    assert c.charge_for("5M") == Decimal("20.00")
+    assert c.charge_for("HIP") == Decimal(0)
+
+
+def test_the_same_reason_twice_adds_together():
+    c = (
+        FareComponent((out_sector(),))
+        .priced_with(a_fare(), Decimal("400.00"))
+        .with_surcharge(Decimal("20.00"), "Q")
+        .with_surcharge(Decimal("12.00"), "Q")
+    )
+    assert c.charge_for("Q") == Decimal("32.00")
+    assert c.notes == ("Q", "Q")
+
+
+def test_pricing_a_component_keeps_charges_already_on_it():
+    plain = FareComponent((out_sector(),)).with_surcharge(Decimal("20.00"), "5M")
+    priced = plain.priced_with(a_fare(), Decimal("400.00"))
+    assert priced.charge_for("5M") == Decimal("20.00")
+    assert priced.total_nuc == Decimal("420.00")
+
+
+def test_a_component_with_no_charges_has_none_of_either():
+    plain = FareComponent((out_sector(),))
+    assert plain.charges == ()
+    assert plain.notes == ()
+    assert plain.surcharges == Decimal(0)

@@ -31,14 +31,31 @@ from gussetline.tariff import Fare
 
 
 @dataclass(frozen=True, slots=True)
+class Charge:
+    """One addition to a component, and what put it there.
+
+    A single running total was enough until the fare calculation line had to
+    be written, and then it was not: the line shows a Q surcharge in a
+    different place from a mileage surcharge and does not show a higher
+    intermediate point finding as an addition at all. A total cannot be taken
+    apart afterwards, so the parts are kept.
+    """
+
+    reason: str
+    nuc: Decimal
+
+    def __str__(self) -> str:
+        return f"{self.reason} {self.nuc}"
+
+
+@dataclass(frozen=True, slots=True)
 class FareComponent:
     """One published fare and the sectors it covers."""
 
     elements: tuple[Element, ...]
     fare: Fare | None = None
     nuc: Decimal | None = None
-    surcharges: Decimal = Decimal(0)
-    notes: tuple[str, ...] = field(default_factory=tuple)
+    charges: tuple[Charge, ...] = field(default_factory=tuple)
 
     def __post_init__(self) -> None:
         if not self.elements:
@@ -100,18 +117,29 @@ class FareComponent:
         return any(isinstance(e, SurfaceSector) for e in self.elements)
 
     @property
+    def surcharges(self) -> Decimal:
+        return sum((charge.nuc for charge in self.charges), Decimal(0))
+
+    @property
+    def notes(self) -> tuple[str, ...]:
+        return tuple(charge.reason for charge in self.charges)
+
+    @property
     def total_nuc(self) -> Decimal:
         if self.nuc is None:
             raise ConstructionError("this component has not been priced yet")
         return self.nuc + self.surcharges
+
+    def charge_for(self, reason: str) -> Decimal:
+        """What one named reason added. Zero when it did not fire."""
+        return sum((c.nuc for c in self.charges if c.reason == reason), Decimal(0))
 
     def priced_with(self, fare: Fare, nuc: Decimal) -> FareComponent:
         return FareComponent(
             elements=self.elements,
             fare=fare,
             nuc=nuc,
-            surcharges=self.surcharges,
-            notes=self.notes,
+            charges=self.charges,
         )
 
     def with_surcharge(self, amount: Decimal, reason: str) -> FareComponent:
@@ -119,8 +147,7 @@ class FareComponent:
             elements=self.elements,
             fare=self.fare,
             nuc=self.nuc,
-            surcharges=self.surcharges + amount,
-            notes=(*self.notes, reason),
+            charges=(*self.charges, Charge(reason, amount)),
         )
 
     def __str__(self) -> str:

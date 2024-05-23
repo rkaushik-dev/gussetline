@@ -17,7 +17,9 @@ from gussetline.errors import ConstructionError
 from gussetline.exchange import Converter, RateTable
 from gussetline.fcl import (
     adds_up,
+    compare,
     components_in,
+    parse,
     render,
     render_component,
     roe_in,
@@ -241,3 +243,128 @@ def test_a_line_whose_total_was_not_rebuilt_is_caught():
 def test_counting_components_ignores_the_totals_and_the_surcharge():
     line = "FRA LH NYC Q30.00 441.64 LH FRA 441.64 NUC913.28END ROE0.951000"
     assert components_in(line) == 2
+
+
+def test_a_line_comes_apart_into_components():
+    read = parse("FRA LH NYC 441.64 LH FRA 441.64 NUC883.28END ROE0.951000")
+    assert len(read.components) == 2
+    assert read.components[0].points == ("FRA", "NYC")
+    assert read.components[0].carriers == ("LH",)
+    assert read.components[0].amount == Decimal("441.64")
+    assert read.total == Decimal("883.28")
+    assert read.roe == Decimal("0.951000")
+
+
+def test_the_second_component_starts_where_the_first_ended():
+    read = parse("FRA LH NYC 441.64 LH FRA 441.64 NUC883.28END ROE0.951000")
+    assert read.components[1].points == ("NYC", "FRA")
+    assert read.components[1].board == "NYC"
+    assert read.components[1].off == "FRA"
+
+
+def test_a_marked_connection_is_read_back_as_one():
+    read = parse("FRA LH X/LON LH NYC 441.64 NUC441.64END ROE0.951000")
+    component = read.components[0]
+    assert component.points == ("FRA", "LON", "NYC")
+    assert component.connections == ("LON",)
+
+
+def test_an_unmarked_intermediate_point_is_not_a_connection():
+    read = parse("FRA LH LON LH NYC 441.64 NUC441.64END ROE0.951000")
+    assert read.components[0].connections == ()
+
+
+def test_a_q_surcharge_and_a_band_are_read_off_the_component():
+    read = parse("FRA LH NYC Q30.00 5M 463.72 NUC493.72END ROE0.951000")
+    component = read.components[0]
+    assert component.q_surcharge == Decimal("30.00")
+    assert component.band == "5M"
+    assert component.amount == Decimal("463.72")
+
+
+def test_a_surface_sector_survives_the_round_trip():
+    read = parse("FRA LH NYC // BOS 441.64 NUC441.64END ROE0.951000")
+    assert read.components[0].points == ("FRA", "NYC", "BOS")
+    assert "//" in read.components[0].carriers
+
+
+def test_a_parsed_line_knows_whether_it_adds_up():
+    assert parse("FRA LH NYC 441.64 LH FRA 441.64 NUC883.28END ROE0.951000").adds_up
+    assert not parse("FRA LH NYC 441.64 LH FRA 441.64 NUC900.00END ROE0.951000").adds_up
+
+
+def test_the_gap_a_minimum_check_leaves_is_reported_as_unexplained():
+    read = parse("FRA LH NYC 441.64 LH FRA 441.64 NUC923.28END ROE0.951000")
+    assert read.unexplained == Decimal("40.00")
+
+
+def test_parsing_refuses_only_the_two_things_it_cannot_guess():
+    with pytest.raises(ConstructionError):
+        parse("")
+    with pytest.raises(ConstructionError):
+        parse("FRA LH NYC 441.64 ROE0.951000")
+    with pytest.raises(ConstructionError):
+        parse("FRA LH NYC 441.64 NUC441.64END")
+
+
+def test_what_we_render_is_what_we_read_back(converter):
+    line = render(build(converter), ROE)
+    read = parse(line)
+    assert read.raw == line
+    assert len(read.components) == 2
+    assert read.total == total_in(line)
+    assert read.roe == roe_in(line)
+
+
+def test_two_identical_lines_have_nothing_to_say():
+    line = "FRA LH NYC 441.64 LH FRA 441.64 NUC883.28END ROE0.951000"
+    assert compare(line, line) == []
+
+
+def test_a_different_total_is_reported():
+    found = compare(
+        "FRA LH NYC 441.64 LH FRA 441.64 NUC883.28END ROE0.951000",
+        "FRA LH NYC 441.64 LH FRA 441.64 NUC903.28END ROE0.951000",
+    )
+    assert found == ["neutral total 883.28 against 903.28"]
+
+
+def test_a_different_rate_is_reported():
+    found = compare(
+        "FRA LH NYC 441.64 NUC441.64END ROE0.951000",
+        "FRA LH NYC 441.64 NUC441.64END ROE0.924000",
+    )
+    assert found == ["rate of exchange 0.951000 against 0.924000"]
+
+
+def test_a_different_component_count_stops_there():
+    found = compare(
+        "FRA LH NYC 441.64 LH FRA 441.64 NUC883.28END ROE0.951000",
+        "FRA LH NYC 883.28 NUC883.28END ROE0.951000",
+    )
+    assert found == ["2 components against 1"]
+
+
+def test_a_different_route_on_one_component_is_named():
+    found = compare(
+        "FRA LH LON LH NYC 441.64 NUC441.64END ROE0.951000",
+        "FRA LH AMS LH NYC 441.64 NUC441.64END ROE0.951000",
+    )
+    assert found == ["component 1 routes FRA-LON-NYC against FRA-AMS-NYC"]
+
+
+def test_a_different_amount_and_band_are_both_named():
+    found = compare(
+        "FRA LH NYC 5M 463.72 NUC463.72END ROE0.951000",
+        "FRA LH NYC 441.64 NUC441.64END ROE0.951000",
+    )
+    assert "component 1 is 463.72 against 441.64" in found
+    assert "component 1 band 5M against none" in found
+
+
+def test_a_q_surcharge_only_one_side_charged_is_named():
+    found = compare(
+        "FRA LH NYC Q30.00 441.64 NUC471.64END ROE0.951000",
+        "FRA LH NYC 441.64 NUC441.64END ROE0.951000",
+    )
+    assert "component 1 q surcharge 30.00 against 0" in found

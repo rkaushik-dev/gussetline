@@ -19,6 +19,7 @@ currency does, because the line is checked by hand against the published rate.
 from __future__ import annotations
 
 from collections.abc import Iterable
+from dataclasses import dataclass
 from decimal import Decimal
 
 from gussetline.components import FareComponent
@@ -143,3 +144,155 @@ def adds_up(line: str) -> bool:
             except Exception:
                 continue
     return running == claimed
+
+
+@dataclass(frozen=True, slots=True)
+class ParsedComponent:
+    """One component read back off a supplier's line."""
+
+    points: tuple[str, ...]
+    carriers: tuple[str, ...]
+    amount: Decimal
+    q_surcharge: Decimal = Decimal(0)
+    band: str = ""
+    connections: tuple[str, ...] = ()
+
+    @property
+    def board(self) -> str:
+        return self.points[0]
+
+    @property
+    def off(self) -> str:
+        return self.points[-1]
+
+    def __str__(self) -> str:
+        return f"{self.board}{self.off} {self.amount}"
+
+
+@dataclass(frozen=True, slots=True)
+class ParsedLine:
+    """A whole line read back, with everything it claimed."""
+
+    components: tuple[ParsedComponent, ...]
+    total: Decimal
+    roe: Decimal
+    raw: str
+
+    @property
+    def adds_up(self) -> bool:
+        running = sum((c.amount + c.q_surcharge for c in self.components), Decimal(0))
+        return running == self.total
+
+    @property
+    def unexplained(self) -> Decimal:
+        """Total minus the parts. A minimum check shows up here and should."""
+        return self.total - sum((c.amount + c.q_surcharge for c in self.components), Decimal(0))
+
+
+def parse(line: str) -> ParsedLine:
+    """Read a fare calculation line into its parts.
+
+    Written for lines other systems produced, so it is forgiving about
+    spacing and refuses only on the two things it cannot guess at, which are
+    a missing neutral total and a missing rate of exchange. A component whose
+    shape it does not recognise is still returned, because a line the desk
+    cannot fully read is exactly the line worth looking at by hand.
+    """
+    tokens = line.replace("//", " // ").split()
+    if not tokens:
+        raise ConstructionError("nothing to parse")
+
+    total: Decimal | None = None
+    roe: Decimal | None = None
+    body: list[str] = []
+    for token in tokens:
+        if token.startswith("NUC") and token.endswith("END"):
+            total = Decimal(token[3:-3])
+            continue
+        if token.startswith("ROE"):
+            roe = Decimal(token[3:])
+            continue
+        body.append(token)
+
+    if total is None:
+        raise ConstructionError("no neutral total on the line", line=line)
+    if roe is None:
+        raise ConstructionError("no rate of exchange on the line", line=line)
+
+    components: list[ParsedComponent] = []
+    points: list[str] = []
+    carriers: list[str] = []
+    connections: list[str] = []
+    q_amount = Decimal(0)
+    band = ""
+
+    for token in body:
+        if _looks_like_amount(token):
+            if points:
+                components.append(
+                    ParsedComponent(
+                        points=tuple(points),
+                        carriers=tuple(carriers),
+                        amount=Decimal(token),
+                        q_surcharge=q_amount,
+                        band=band,
+                        connections=tuple(connections),
+                    )
+                )
+            carry = points[-1] if points else ""
+            points = [carry] if carry else []
+            carriers, connections = [], []
+            q_amount, band = Decimal(0), ""
+            continue
+        if token.startswith("Q") and len(token) > 1 and token[1].isdigit():
+            q_amount = Decimal(token[1:])
+            continue
+        if token in BANDS:
+            band = token
+            continue
+        if token == "//":
+            carriers.append("//")
+            continue
+        if token.startswith("X/"):
+            points.append(token[2:])
+            connections.append(token[2:])
+            continue
+        if len(token) == 3 and token.isalnum() and token.isupper() and not token.isdigit():
+            points.append(token)
+            continue
+        carriers.append(token)
+
+    return ParsedLine(tuple(components), total, roe, line)
+
+
+def compare(ours: str, theirs: str) -> list[str]:
+    """Every way two lines disagree, said in words.
+
+    Returns an empty list when they agree, which is the only shape a caller
+    should treat as a pass. Anything else is a finding, and the sentences go
+    straight into the discrepancy the desk sends the supplier.
+    """
+    mine, yours = parse(ours), parse(theirs)
+    found: list[str] = []
+
+    if mine.total != yours.total:
+        found.append(f"neutral total {mine.total} against {yours.total}")
+    if mine.roe != yours.roe:
+        found.append(f"rate of exchange {mine.roe} against {yours.roe}")
+    if len(mine.components) != len(yours.components):
+        found.append(f"{len(mine.components)} components against {len(yours.components)}")
+        return found
+
+    for index, (left, right) in enumerate(
+        zip(mine.components, yours.components, strict=True), start=1
+    ):
+        where = f"component {index}"
+        if left.points != right.points:
+            found.append(f"{where} routes {'-'.join(left.points)} against {'-'.join(right.points)}")
+        if left.amount != right.amount:
+            found.append(f"{where} is {left.amount} against {right.amount}")
+        if left.q_surcharge != right.q_surcharge:
+            found.append(f"{where} q surcharge {left.q_surcharge} against {right.q_surcharge}")
+        if left.band != right.band:
+            found.append(f"{where} band {left.band or 'none'} against {right.band or 'none'}")
+    return found

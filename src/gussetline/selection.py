@@ -184,10 +184,25 @@ def _class_available(component: FareComponent, fare: Fare) -> bool:
     return any(segment.booking_class == fare.booking_class for segment in component.segments)
 
 
+def apply_fare(component: FareComponent, selection: Selection) -> FareComponent:
+    """Attach the winning fare at its filed amount, with no band on it yet.
+
+    The band is left off because the minimum checks run against the base and
+    can raise it, and the mileage percentage applies to whatever fare ends up
+    governing rather than to the one that was selected.
+    """
+    return component.priced_with(selection.chosen.fare, selection.chosen.base_nuc)
+
+
+def apply_band(component: FareComponent, selection: Selection) -> FareComponent:
+    """Put the mileage surcharge on, measured against the fare as it now is."""
+    result = selection.chosen.mileage
+    amount = result.surcharge_on(component.total_nuc)
+    if amount <= 0:
+        return component
+    return component.with_surcharge(amount, result.band)
+
+
 def apply_selection(component: FareComponent, selection: Selection) -> FareComponent:
-    """Attach the winner to the component, mileage surcharge and all."""
-    chosen = selection.chosen
-    priced = component.priced_with(chosen.fare, chosen.base_nuc)
-    if chosen.surcharge > 0:
-        return priced.with_surcharge(chosen.surcharge, chosen.band)
-    return priced
+    """Fare and band in one step, for a component nothing else will touch."""
+    return apply_band(apply_fare(component, selection), selection)

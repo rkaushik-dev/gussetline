@@ -5,7 +5,7 @@ from decimal import Decimal
 
 import pytest
 
-from conftest import segment, surface
+from conftest import fare, segment, surface
 from gussetline.components import FareComponent
 from gussetline.construction import (
     Construction,
@@ -25,36 +25,21 @@ from gussetline.fcl import (
     roe_in,
     total_in,
 )
-from gussetline.indicators import GlobalIndicator
-from gussetline.money import Money
-from gussetline.tariff import Fare, OwRt
+from gussetline.tariff import OwRt
 from gussetline.trace import Trace
-
-TICKETING = date(2025, 2, 14)
-ROE = Decimal("0.951")
 
 
 @pytest.fixture
 def converter():
+    # These tests read the rate off the rendered line, so one to one would
+    # hide a conversion that never happened.
     table = RateTable("roe")
     table.add("EUR", date(2025, 1, 1), "0.951")
     return Converter(table)
 
 
-def a_fare(origin="FRA", destination="JFK", amount="420.00", **over) -> Fare:
-    base = {
-        "carrier": "LH",
-        "origin": origin,
-        "destination": destination,
-        "fare_basis": "KLWAP7RT",
-        "amount": Money.of(amount, "EUR"),
-        "owrt": OwRt.ROUND_TRIP_HALF,
-        "global_indicator": GlobalIndicator.AT,
-        "rule_number": "1100",
-        "routing_number": "0000",
-    }
-    base.update(over)
-    return Fare(**base)
+TICKETING = date(2025, 2, 14)
+ROE = Decimal("0.951")
 
 
 def out(converter):
@@ -62,7 +47,7 @@ def out(converter):
         FareComponent(
             (segment("LH", "400", "FRA", "JFK", "2025-03-04 10:25", "2025-03-04 13:05"),)
         ),
-        a_fare(),
+        fare(),
         converter,
         TICKETING,
     )
@@ -73,7 +58,7 @@ def home(converter):
         FareComponent(
             (segment("LH", "401", "JFK", "FRA", "2025-03-18 18:30", "2025-03-19 08:05"),)
         ),
-        a_fare("JFK", "FRA"),
+        fare("JFK", "FRA"),
         converter,
         TICKETING,
     )
@@ -87,7 +72,7 @@ def via_london(converter):
                 segment("LH", "400", "LHR", "JFK", "2025-03-04 11:05", "2025-03-04 14:00"),
             )
         ),
-        a_fare(),
+        fare(),
         converter,
         TICKETING,
     )
@@ -130,7 +115,7 @@ def test_a_surface_sector_is_written_with_slashes(converter):
                 surface("JFK", "BOS"),
             )
         ),
-        a_fare(destination="BOS"),
+        fare(destination="BOS"),
         converter,
         TICKETING,
     )
@@ -181,7 +166,7 @@ def test_a_one_way_line_carries_one_amount(converter):
             FareComponent(
                 (segment("LH", "400", "FRA", "JFK", "2025-03-04 10:25", "2025-03-04 13:05"),)
             ),
-            a_fare(owrt=OwRt.ONE_WAY_ONLY),
+            fare(owrt=OwRt.ONE_WAY_ONLY),
             converter,
             TICKETING,
         )

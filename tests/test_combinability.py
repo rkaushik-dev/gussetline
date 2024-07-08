@@ -4,7 +4,7 @@ from datetime import date
 
 import pytest
 
-from conftest import segment
+from conftest import fare, segment
 from gussetline.combinability import (
     Combinability,
     CombinabilityStore,
@@ -14,57 +14,31 @@ from gussetline.combinability import (
 from gussetline.components import FareComponent, PricingUnit
 from gussetline.construction import assemble_one_way, assemble_round_trip, price_component
 from gussetline.errors import CombinabilityError
-from gussetline.exchange import Converter, RateTable
-from gussetline.indicators import GlobalIndicator
 from gussetline.itinerary import JourneyType
-from gussetline.money import Money
-from gussetline.tariff import Fare, OwRt
+from gussetline.tariff import OwRt
 from gussetline.trace import Stage, Trace
 
 TICKETING = date(2025, 2, 14)
 
 
-@pytest.fixture
-def converter():
-    table = RateTable("roe")
-    table.add("EUR", date(2025, 1, 1), "1.000")
-    return Converter(table)
-
-
-def a_fare(origin="FRA", destination="JFK", carrier="LH", basis="KLWAP7RT", **over) -> Fare:
-    base = {
-        "carrier": carrier,
-        "origin": origin,
-        "destination": destination,
-        "fare_basis": basis,
-        "amount": Money.of("420.00", "EUR"),
-        "owrt": OwRt.ROUND_TRIP_HALF,
-        "global_indicator": GlobalIndicator.AT,
-        "rule_number": "1100",
-        "routing_number": "0000",
-    }
-    base.update(over)
-    return Fare(**base)
-
-
-def out(converter, **over):
+def out(flat_converter, **over):
     return price_component(
         FareComponent(
             (segment("LH", "400", "FRA", "JFK", "2025-03-04 10:25", "2025-03-04 13:05"),)
         ),
-        a_fare(**over),
-        converter,
+        fare(**over),
+        flat_converter,
         TICKETING,
     )
 
 
-def home(converter, **over):
+def home(flat_converter, **over):
     return price_component(
         FareComponent(
             (segment("LH", "401", "JFK", "FRA", "2025-03-18 18:30", "2025-03-19 08:05"),)
         ),
-        a_fare(origin="JFK", destination="FRA", **over),
-        converter,
+        fare(origin="JFK", destination="FRA", **over),
+        flat_converter,
         TICKETING,
     )
 
@@ -107,33 +81,33 @@ def test_the_store_finds_a_record_by_carrier_and_basis():
     assert len(store) == 1
 
 
-def test_a_one_way_unit_passes_without_a_lookup(converter):
-    unit = assemble_one_way(out(converter, owrt=OwRt.ONE_WAY_ONLY))
+def test_a_one_way_unit_passes_without_a_lookup(flat_converter):
+    unit = assemble_one_way(out(flat_converter, owrt=OwRt.ONE_WAY_ONLY))
     trace = Trace()
     assert check_unit(unit, CombinabilityStore(), trace) == []
     assert not trace.failed
 
 
-def test_a_round_trip_of_two_permitted_fares_passes(converter):
+def test_a_round_trip_of_two_permitted_fares_passes(flat_converter):
     store = CombinabilityStore()
     store.add(record())
-    unit = assemble_round_trip(out(converter), home(converter))
+    unit = assemble_round_trip(out(flat_converter), home(flat_converter))
     trace = Trace()
     assert check_unit(unit, store, trace) == []
     assert len(trace.for_stage(Stage.COMBINABILITY)) == 1
 
 
-def test_a_fare_with_nothing_filed_combines_with_nothing(converter):
-    unit = assemble_round_trip(out(converter), home(converter))
+def test_a_fare_with_nothing_filed_combines_with_nothing(flat_converter):
+    unit = assemble_round_trip(out(flat_converter), home(flat_converter))
     refusals = check_unit(unit, CombinabilityStore())
     assert len(refusals) == 2
     assert "has no combinability filed" in refusals[0]
 
 
-def test_a_fare_that_does_not_permit_the_shape_refuses(converter):
+def test_a_fare_that_does_not_permit_the_shape_refuses(flat_converter):
     store = CombinabilityStore()
     store.add(record(round_trip=False, circle_trip=True))
-    unit = assemble_round_trip(out(converter), home(converter))
+    unit = assemble_round_trip(out(flat_converter), home(flat_converter))
     trace = Trace()
     refusals = check_unit(unit, store, trace)
     assert refusals == [
@@ -143,34 +117,34 @@ def test_a_fare_that_does_not_permit_the_shape_refuses(converter):
     assert trace.stage_failed(Stage.COMBINABILITY)
 
 
-def test_a_same_carrier_filing_refuses_a_mixed_carrier_unit(converter):
+def test_a_same_carrier_filing_refuses_a_mixed_carrier_unit(flat_converter):
     store = CombinabilityStore()
     store.add(record(same_carrier_only=True))
     store.add(record(carrier="UA", same_carrier_only=False))
-    unit = assemble_round_trip(out(converter), home(converter, carrier="UA"))
+    unit = assemble_round_trip(out(flat_converter), home(flat_converter, carrier="UA"))
     refusals = check_unit(unit, store)
     assert any("same carrier only" in r for r in refusals)
 
 
-def test_a_mixed_carrier_unit_passes_when_neither_side_insists(converter):
+def test_a_mixed_carrier_unit_passes_when_neither_side_insists(flat_converter):
     store = CombinabilityStore()
     store.add(record(same_carrier_only=False))
     store.add(record(carrier="UA", same_carrier_only=False))
-    unit = assemble_round_trip(out(converter), home(converter, carrier="UA"))
+    unit = assemble_round_trip(out(flat_converter), home(flat_converter, carrier="UA"))
     assert check_unit(unit, store) == []
 
 
-def test_a_same_rule_filing_refuses_two_different_bases(converter):
+def test_a_same_rule_filing_refuses_two_different_bases(flat_converter):
     store = CombinabilityStore()
     store.add(record(same_carrier_only=False, same_rule_only=True))
     store.add(record(basis="QLWAP14RT", same_carrier_only=False))
-    unit = assemble_round_trip(out(converter), home(converter, basis="QLWAP14RT"))
+    unit = assemble_round_trip(out(flat_converter), home(flat_converter, basis="QLWAP14RT"))
     refusals = check_unit(unit, store)
     assert any("same rule only" in r for r in refusals)
 
 
-def test_combinability_runs_after_the_unit_is_priced(converter):
-    unit = assemble_round_trip(out(converter), home(converter))
+def test_combinability_runs_after_the_unit_is_priced(flat_converter):
+    unit = assemble_round_trip(out(flat_converter), home(flat_converter))
     unpriced = unit.replace(
         0,
         FareComponent(
@@ -181,41 +155,41 @@ def test_combinability_runs_after_the_unit_is_priced(converter):
         check_unit(unpriced, CombinabilityStore())
 
 
-def test_one_pricing_unit_needs_no_end_on_end_permission(converter):
-    unit = assemble_one_way(out(converter, owrt=OwRt.ONE_WAY_ONLY))
+def test_one_pricing_unit_needs_no_end_on_end_permission(flat_converter):
+    unit = assemble_one_way(out(flat_converter, owrt=OwRt.ONE_WAY_ONLY))
     trace = Trace()
     assert check_end_on_end([unit], CombinabilityStore(), trace) == []
     assert not trace.failed
 
 
-def test_two_units_both_permitting_end_on_end_pass(converter):
+def test_two_units_both_permitting_end_on_end_pass(flat_converter):
     store = CombinabilityStore()
     store.add(record(end_on_end=True))
-    one = assemble_one_way(out(converter, owrt=OwRt.ONE_WAY_ONLY))
-    two = assemble_one_way(home(converter, owrt=OwRt.ONE_WAY_ONLY))
+    one = assemble_one_way(out(flat_converter, owrt=OwRt.ONE_WAY_ONLY))
+    two = assemble_one_way(home(flat_converter, owrt=OwRt.ONE_WAY_ONLY))
     assert check_end_on_end([one, two], store) == []
 
 
-def test_one_fare_refusing_end_on_end_stops_the_whole_ticket(converter):
+def test_one_fare_refusing_end_on_end_stops_the_whole_ticket(flat_converter):
     store = CombinabilityStore()
     store.add(record(end_on_end=True))
     store.add(record(basis="QLWAP14RT", end_on_end=False))
-    one = assemble_one_way(out(converter, owrt=OwRt.ONE_WAY_ONLY))
-    two = assemble_one_way(home(converter, basis="QLWAP14RT", owrt=OwRt.ONE_WAY_ONLY))
+    one = assemble_one_way(out(flat_converter, owrt=OwRt.ONE_WAY_ONLY))
+    two = assemble_one_way(home(flat_converter, basis="QLWAP14RT", owrt=OwRt.ONE_WAY_ONLY))
     trace = Trace()
     refusals = check_end_on_end([one, two], store, trace)
     assert refusals == ["LH QLWAP14RT does not permit end on end"]
     assert trace.stage_failed(Stage.COMBINABILITY)
 
 
-def test_an_unfiled_fare_refuses_end_on_end_too(converter):
-    one = assemble_one_way(out(converter, owrt=OwRt.ONE_WAY_ONLY))
-    two = assemble_one_way(home(converter, owrt=OwRt.ONE_WAY_ONLY))
+def test_an_unfiled_fare_refuses_end_on_end_too(flat_converter):
+    one = assemble_one_way(out(flat_converter, owrt=OwRt.ONE_WAY_ONLY))
+    two = assemble_one_way(home(flat_converter, owrt=OwRt.ONE_WAY_ONLY))
     refusals = check_end_on_end([one, two], CombinabilityStore())
     assert len(refusals) == 2
 
 
-def test_end_on_end_runs_after_pricing(converter):
+def test_end_on_end_runs_after_pricing(flat_converter):
     unpriced = PricingUnit(
         (
             FareComponent(
@@ -224,6 +198,6 @@ def test_end_on_end_runs_after_pricing(converter):
         ),
         JourneyType.ONE_WAY,
     )
-    one = assemble_one_way(out(converter, owrt=OwRt.ONE_WAY_ONLY))
+    one = assemble_one_way(out(flat_converter, owrt=OwRt.ONE_WAY_ONLY))
     with pytest.raises(CombinabilityError):
         check_end_on_end([one, unpriced], CombinabilityStore())

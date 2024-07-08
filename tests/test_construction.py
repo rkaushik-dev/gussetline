@@ -5,7 +5,7 @@ from decimal import Decimal
 
 import pytest
 
-from conftest import segment
+from conftest import fare, segment
 from gussetline.components import FareComponent
 from gussetline.construction import (
     Construction,
@@ -17,33 +17,19 @@ from gussetline.construction import (
 )
 from gussetline.errors import ConstructionError
 from gussetline.exchange import Converter, default_roe_table
-from gussetline.indicators import GlobalIndicator
 from gussetline.money import Money
-from gussetline.tariff import Fare, OwRt
+from gussetline.tariff import OwRt
 from gussetline.trace import Stage, Trace
-
-TICKETING = date(2025, 2, 14)
 
 
 @pytest.fixture
 def converter():
+    # The published quarterly rates, because these tests are about the
+    # conversion and a rate of one would not exercise the truncation.
     return Converter(default_roe_table())
 
 
-def a_fare(**over) -> Fare:
-    base = {
-        "carrier": "LH",
-        "origin": "FRA",
-        "destination": "JFK",
-        "fare_basis": "KLWAP7RT",
-        "amount": Money.of("420.00", "EUR"),
-        "owrt": OwRt.ROUND_TRIP_HALF,
-        "global_indicator": GlobalIndicator.AT,
-        "rule_number": "1100",
-        "routing_number": "0001",
-    }
-    base.update(over)
-    return Fare(**base)
+TICKETING = date(2025, 2, 14)
 
 
 def out():
@@ -60,24 +46,24 @@ def home():
 
 def test_a_fare_converts_into_neutral_units_and_truncates(converter):
     # 420.00 EUR at the first quarter rate of 0.951 is 441.640378...
-    assert fare_to_nuc(a_fare(), converter, TICKETING) == Decimal("441.64")
+    assert fare_to_nuc(fare(), converter, TICKETING) == Decimal("441.64")
 
 
 def test_a_round_trip_half_converts_as_filed_and_stays_a_half(converter):
-    half = fare_to_nuc(a_fare(owrt=OwRt.ROUND_TRIP_HALF), converter, TICKETING)
-    whole = fare_to_nuc(a_fare(owrt=OwRt.ONE_WAY_ONLY), converter, TICKETING)
+    half = fare_to_nuc(fare(owrt=OwRt.ROUND_TRIP_HALF), converter, TICKETING)
+    whole = fare_to_nuc(fare(owrt=OwRt.ONE_WAY_ONLY), converter, TICKETING)
     assert half == whole
 
 
 def test_the_quarter_the_ticket_was_sold_in_decides_the_rate(converter):
-    first = fare_to_nuc(a_fare(), converter, date(2025, 2, 14))
-    second = fare_to_nuc(a_fare(), converter, date(2025, 5, 14))
+    first = fare_to_nuc(fare(), converter, date(2025, 2, 14))
+    second = fare_to_nuc(fare(), converter, date(2025, 5, 14))
     assert first != second
 
 
 def test_pricing_a_component_attaches_the_fare_and_records_it(converter):
     trace = Trace()
-    priced = price_component(out(), a_fare(), converter, TICKETING, trace)
+    priced = price_component(out(), fare(), converter, TICKETING, trace)
     assert priced.fare is not None
     assert priced.nuc == Decimal("441.64")
     assert len(trace.for_stage(Stage.CONVERSION)) == 1
@@ -85,11 +71,11 @@ def test_pricing_a_component_attaches_the_fare_and_records_it(converter):
 
 
 def test_pricing_without_a_trace_is_allowed(converter):
-    assert price_component(out(), a_fare(), converter, TICKETING).nuc == Decimal("441.64")
+    assert price_component(out(), fare(), converter, TICKETING).nuc == Decimal("441.64")
 
 
 def priced(component, converter, **over):
-    return price_component(component, a_fare(**over), converter, TICKETING)
+    return price_component(component, fare(**over), converter, TICKETING)
 
 
 def test_a_round_trip_unit_needs_both_halves_priced(converter):
@@ -144,8 +130,8 @@ def test_a_circle_trip_assembles_from_three(converter):
     unit = assemble_circle_trip(
         (
             priced(out(), converter),
-            price_component(middle, a_fare(origin="JFK", destination="LAX"), converter, TICKETING),
-            price_component(back, a_fare(origin="LAX", destination="FRA"), converter, TICKETING),
+            price_component(middle, fare(origin="JFK", destination="LAX"), converter, TICKETING),
+            price_component(back, fare(origin="LAX", destination="FRA"), converter, TICKETING),
         )
     )
     assert len(unit) == 3

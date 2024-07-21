@@ -31,6 +31,7 @@ from gussetline.carriers import normalise_code
 from gussetline.components import FareComponent
 from gussetline.discounts import Passenger, PassengerType
 from gussetline.errors import NoRuleFound, ValidationError
+from gussetline.flights import Segment
 from gussetline.itinerary import Itinerary
 from gussetline.trace import Stage, Trace
 
@@ -127,6 +128,24 @@ class Context:
     @property
     def journey_departure(self) -> date:
         return self.itinerary.departure.date()
+
+    @property
+    def turnaround_arrival(self) -> date | None:
+        """When the passenger got to the far end, which is when a stay starts.
+
+        Not the arrival on the itinerary, which is the arrival back home and
+        is the wrong end of the journey. A minimum stay measured from there
+        comes out negative on every round trip, and because it then fails
+        every fare, it reads as a strict rule rather than as a bug.
+        """
+        turn = self.itinerary.turnaround_index()
+        if turn <= 0 or turn >= len(self.itinerary.points):
+            return None
+        for index in range(turn - 1, -1, -1):
+            element = self.itinerary.elements[index]
+            if isinstance(element, Segment):
+                return element.arrival_date
+        return None
 
     @property
     def return_departure(self) -> date | None:

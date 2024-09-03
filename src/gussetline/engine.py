@@ -50,6 +50,9 @@ from gussetline.minimums import (
 )
 from gussetline.money import Money
 from gussetline.routing import RoutingStore
+from gussetline.rules.base import Context as RuleContext
+from gussetline.rules.base import RuleStore, evaluate, refusals
+from gussetline.rules.breaks import Stopovers
 from gussetline.selection import apply_band, apply_fare, select
 from gussetline.surcharges import SurchargeTable, apply_all, assess_component
 from gussetline.tariff import TariffStore
@@ -71,6 +74,7 @@ class Tariffs:
     surcharges: SurchargeTable = field(default_factory=SurchargeTable)
     combinability: CombinabilityStore = field(default_factory=CombinabilityStore)
     allowances: ExtraMileageAllowance = field(default_factory=ExtraMileageAllowance)
+    rules: RuleStore = field(default_factory=RuleStore)
 
 
 @dataclass(frozen=True, slots=True)
@@ -129,36 +133,18 @@ def price(
     connections = itinerary.connections()
 
     priced: list[FareComponent] = []
+    refused: list[str] = []
     for component in components:
-        chosen = select(
-            component,
-            tariffs.fares,
-            tariffs.routings,
-            tariffs.miles,
-            converter,
-            ticketing,
-            allowances=tariffs.allowances,
-            trace=trail,
+        built, said = _price_component(
+            component, itinerary, tariffs, converter, ticketing, stopovers, trail
         )
-        with_fare = apply_fare(component, chosen)
-        hip = hip_check(with_fare, tariffs.fares, converter, ticketing, stopovers, trail)
-        backhaul = backhaul_check(
-            with_fare, tariffs.fares, converter, ticketing, tariffs.miles, trail
-        )
-        governing = apply_minimum(with_fare, highest_of(hip, backhaul), "HIP")
-        banded = apply_band(governing, chosen)
-        priced.append(
-            apply_all(
-                banded,
-                assess_component(banded, tariffs.surcharges, converter, ticketing, trail),
-            )
-        )
+        priced.append(built)
+        refused.extend(said)
 
     units = _assemble(priced, kind, trail)
-    refusals: list[str] = []
     for unit in units:
-        refusals.extend(check_unit(unit, tariffs.combinability, trail))
-    refusals.extend(check_end_on_end(units, tariffs.combinability, trail))
+        refused.extend(check_unit(unit, tariffs.combinability, trail))
+    refused.extend(check_end_on_end(units, tariffs.combinability, trail))
 
     construction = Construction(units, selling_currency, ticketing, trail)
     for unit in units:
@@ -169,7 +155,107 @@ def price(
     base = construction.base_fare(converter)
     trail.passed(Stage.CONVERSION, f"{construction.total_nuc} NUC becomes {base}")
     roe = converter.roe.rate_for(selling_currency, ticketing)
-    return Priced(construction, base, render(construction, roe, connections), tuple(refusals))
+    return Priced(construction, base, render(construction, roe, connections), tuple(refused))
+
+
+def _price_component(
+    component: FareComponent,
+    itinerary: Itinerary,
+    tariffs: Tariffs,
+    converter: Converter,
+    ticketing: date,
+    stopovers: tuple[str, ...],
+    trail: Trace,
+) -> tuple[FareComponent, list[str]]:
+    """Take one component from unpriced to fully charged.
+
+    Pulled out of price because the ladder for a single component is eight
+    steps in a fixed order, and having it inline inside a loop inside the
+    journey level function made the order look like an accident of where the
+    lines happened to sit.
+    """
+    chosen = select(
+        component,
+        tariffs.fares,
+        tariffs.routings,
+        tariffs.miles,
+        converter,
+        ticketing,
+        allowances=tariffs.allowances,
+        trace=trail,
+    )
+    with_fare = apply_fare(component, chosen)
+
+    said = _check_rules(with_fare, itinerary, tariffs, ticketing, trail)
+
+    hip = hip_check(with_fare, tariffs.fares, converter, ticketing, stopovers, trail)
+    backhaul = backhaul_check(with_fare, tariffs.fares, converter, ticketing, tariffs.miles, trail)
+    governing = apply_minimum(with_fare, highest_of(hip, backhaul), "HIP")
+    banded = apply_band(governing, chosen)
+    charged = apply_all(
+        banded,
+        assess_component(banded, tariffs.surcharges, converter, ticketing, trail),
+    )
+    return _charge_stopovers(charged, itinerary, tariffs, ticketing, trail), said
+
+
+def _rule_context(component: FareComponent, itinerary: Itinerary, ticketing: date) -> RuleContext:
+    return RuleContext(itinerary=itinerary, component=component, ticketing=ticketing)
+
+
+def _check_rules(
+    component: FareComponent,
+    itinerary: Itinerary,
+    tariffs: Tariffs,
+    ticketing: date,
+    trail: Trace,
+) -> list[str]:
+    """Run the fare's own rule and return everything that refused."""
+    if component.fare is None:
+        return []
+    rule = tariffs.rules.find(
+        component.fare.carrier, component.fare.rule_number, component.fare.tariff_number
+    )
+    if rule is None:
+        trail.note(
+            Stage.RULE,
+            f"no rule {component.fare.rule_number} filed for {component.fare.carrier}",
+        )
+        return []
+    outcomes = evaluate(rule.provisions, _rule_context(component, itinerary, ticketing), trail)
+    return list(refusals(outcomes))
+
+
+def _charge_stopovers(
+    component: FareComponent,
+    itinerary: Itinerary,
+    tariffs: Tariffs,
+    ticketing: date,
+    trail: Trace,
+) -> FareComponent:
+    """Add whatever the fare charges for the stopovers actually taken.
+
+    This is a rule producing money rather than a verdict, which is why it
+    happens here and not inside the rule check. It lands after the surcharges
+    and before the unit minimums, in the same place a Q surcharge does.
+    """
+    if component.fare is None:
+        return component
+    rule = tariffs.rules.find(
+        component.fare.carrier, component.fare.rule_number, component.fare.tariff_number
+    )
+    if rule is None:
+        return component
+    context = _rule_context(component, itinerary, ticketing)
+    charged = component
+    for provision in rule.provisions:
+        if not isinstance(provision, Stopovers):
+            continue
+        amount = provision.charge_for(context)
+        if amount > 0:
+            trail.passed(Stage.SURCHARGE, f"stopover charge {amount} NUC", nuc=str(amount))
+            charged = charged.with_surcharge(amount, "SO")
+    return charged
 
 
 def _default_breaks(itinerary: Itinerary, kind: JourneyType) -> tuple[int, ...]:

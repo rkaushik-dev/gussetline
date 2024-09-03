@@ -13,6 +13,9 @@ from gussetline.errors import NoFareFound
 from gussetline.indicators import GlobalIndicator
 from gussetline.itinerary import Itinerary
 from gussetline.money import Money
+from gussetline.rules import RuleSet, RuleStore
+from gussetline.rules.breaks import Stopovers
+from gussetline.rules.stay import MinimumStay
 from gussetline.surcharges import QSurcharge, SurchargeTable
 from gussetline.tariff import OwRt, TariffStore
 from gussetline.trace import Stage
@@ -277,3 +280,127 @@ def test_every_component_reaches_the_line_when_the_split_is_wide(
     )
     assert result.line.startswith("FRA LH LON 90.00 LH NYC 300.00")
     assert result.line.endswith("NUC390.00END ROE1.000000")
+
+
+def rule_for(*provisions, number="1100", carrier="LH"):
+    store = RuleStore()
+    store.add(RuleSet(carrier, number, tuple(provisions)))
+    return store
+
+
+def test_a_fare_whose_rule_refuses_still_prices_and_is_not_issuable(
+    flat_converter, transatlantic_miles, permissive_combinability
+):
+    fares = TariffStore()
+    fares.add(fare("FRA", "JFK", "420.00"))
+    fares.add(fare("JFK", "FRA", "420.00"))
+    loaded = Tariffs(
+        fares=fares,
+        miles=transatlantic_miles,
+        combinability=permissive_combinability,
+        rules=rule_for(MinimumStay(days=21)),
+    )
+    result = price(round_trip(), loaded, flat_converter, TICKETING, "EUR")
+    assert result.total_nuc == Decimal("840.00")
+    assert not result.issuable
+    assert any("cat 6" in r for r in result.refusals)
+
+
+def test_a_fare_whose_rule_is_satisfied_stays_issuable(
+    flat_converter, transatlantic_miles, permissive_combinability
+):
+    fares = TariffStore()
+    fares.add(fare("FRA", "JFK", "420.00"))
+    fares.add(fare("JFK", "FRA", "420.00"))
+    loaded = Tariffs(
+        fares=fares,
+        miles=transatlantic_miles,
+        combinability=permissive_combinability,
+        rules=rule_for(MinimumStay(days=7)),
+    )
+    result = price(round_trip(), loaded, flat_converter, TICKETING, "EUR")
+    assert result.issuable
+
+
+def test_a_fare_with_no_rule_filed_is_noted_and_not_refused(
+    flat_converter, transatlantic_miles, permissive_combinability
+):
+    fares = TariffStore()
+    fares.add(fare("FRA", "JFK", "420.00"))
+    fares.add(fare("JFK", "FRA", "420.00"))
+    loaded = Tariffs(fares=fares, miles=transatlantic_miles, combinability=permissive_combinability)
+    result = price(round_trip(), loaded, flat_converter, TICKETING, "EUR")
+    assert result.issuable
+    assert any("no rule 1100 filed" in s.message for s in result.trace)
+
+
+def test_a_stopover_charge_lands_on_the_component_as_a_surcharge(
+    flat_converter, transatlantic_miles, permissive_combinability
+):
+    trip = Itinerary(
+        [
+            segment("LH", "992", "FRA", "LHR", "2025-03-04 07:00", "2025-03-04 07:40"),
+            segment("LH", "400", "LHR", "JFK", "2025-03-06 11:05", "2025-03-06 14:00"),
+        ]
+    )
+    fares = TariffStore()
+    fares.add(fare("FRA", "JFK", "420.00", owrt=OwRt.ONE_WAY_ONLY))
+    loaded = Tariffs(
+        fares=fares,
+        miles=transatlantic_miles,
+        combinability=permissive_combinability,
+        rules=rule_for(Stopovers(permitted=2, free=0, charge_nuc=Decimal("60.00"))),
+    )
+    result = price(trip, loaded, flat_converter, TICKETING, "EUR")
+    assert result.total_nuc == Decimal("480.00")
+    assert any("stopover charge" in s.message for s in result.trace)
+
+
+def test_a_free_stopover_allowance_charges_nothing(
+    flat_converter, transatlantic_miles, permissive_combinability
+):
+    trip = Itinerary(
+        [
+            segment("LH", "992", "FRA", "LHR", "2025-03-04 07:00", "2025-03-04 07:40"),
+            segment("LH", "400", "LHR", "JFK", "2025-03-06 11:05", "2025-03-06 14:00"),
+        ]
+    )
+    fares = TariffStore()
+    fares.add(fare("FRA", "JFK", "420.00", owrt=OwRt.ONE_WAY_ONLY))
+    loaded = Tariffs(
+        fares=fares,
+        miles=transatlantic_miles,
+        combinability=permissive_combinability,
+        rules=rule_for(Stopovers(permitted=2, free=1, charge_nuc=Decimal("60.00"))),
+    )
+    result = price(trip, loaded, flat_converter, TICKETING, "EUR")
+    assert result.total_nuc == Decimal("420.00")
+
+
+def test_the_same_routing_is_charged_or_not_by_the_clock_alone(
+    flat_converter, transatlantic_miles, permissive_combinability
+):
+    fares = TariffStore()
+    fares.add(fare("FRA", "JFK", "420.00", owrt=OwRt.ONE_WAY_ONLY))
+    loaded = Tariffs(
+        fares=fares,
+        miles=transatlantic_miles,
+        combinability=permissive_combinability,
+        rules=rule_for(Stopovers(permitted=2, free=0, charge_nuc=Decimal("60.00"))),
+    )
+    connecting = Itinerary(
+        [
+            segment("LH", "992", "FRA", "LHR", "2025-03-04 07:00", "2025-03-04 07:40"),
+            segment("LH", "400", "LHR", "JFK", "2025-03-04 11:05", "2025-03-04 14:00"),
+        ]
+    )
+    stopping = Itinerary(
+        [
+            segment("LH", "992", "FRA", "LHR", "2025-03-04 07:00", "2025-03-04 07:40"),
+            segment("LH", "400", "LHR", "JFK", "2025-03-06 11:05", "2025-03-06 14:00"),
+        ]
+    )
+    assert price(connecting, loaded, flat_converter, TICKETING, "EUR").total_nuc == Decimal(
+        "420.00"
+    )
+    assert price(stopping, loaded, flat_converter, TICKETING, "EUR").total_nuc == Decimal("480.00")

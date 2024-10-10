@@ -241,3 +241,63 @@ class Layout:
 def fields(*rows: Sequence[Any]) -> tuple[Field, ...]:
     """Declare a record's fields from tuples, which reads like the spec sheet."""
     return tuple(Field(*row) for row in rows)
+
+
+WRITERS: dict[str, Callable[[Any, int], str]] = {
+    "text": lambda value, width: str(value)[:width].ljust(width),
+    "raw": lambda value, width: str(value)[:width].ljust(width),
+    "int": lambda value, width: str(int(value)).rjust(width, "0"),
+    "date": lambda value, width: value.strftime("%Y%m%d").rjust(width),
+    "daytime": lambda value, width: "".join(f"{part:02d}" for part in value).rjust(width),
+}
+
+
+def _write_decimal(value: Any, width: int, scale: int = 2) -> str:
+    """Write an implied decimal back out, sign first and zero padded."""
+    amount = Decimal(str(value)).quantize(Decimal(1).scaleb(-scale))
+    negative = amount < 0
+    digits = str(abs(amount)).replace(".", "")
+    body = digits.rjust(width - 1 if negative else width, "0")
+    return ("-" + body) if negative else body
+
+
+def _writer_for(kind: str) -> Callable[[Any, int], str]:
+    if kind in WRITERS:
+        return WRITERS[kind]
+    if kind == "amount":
+        return _write_decimal
+    if kind == "amount0":
+        return lambda value, width: _write_decimal(value, width, 0)
+    if kind == "amount3":
+        return lambda value, width: _write_decimal(value, width, 3)
+    raise MalformedPayload("no writer for that field kind", kind=kind)
+
+
+def write_record(spec: RecordSpec, values: dict[str, Any]) -> str:
+    """Render one record, which is how a request goes back to the gateway.
+
+    The same offsets read and write, so a layout that can read a response can
+    build a request, and a round trip through both is a test that the offsets
+    agree with themselves. Two of the three suppliers take their requests in
+    the same format they answer in.
+    """
+    line = list(spec.tag.ljust(max(spec.width, len(spec.tag))))
+    while len(line) < spec.width:
+        line.append(" ")
+    for column in spec.fields:
+        value = values.get(column.name)
+        if value is None:
+            if not column.optional:
+                raise MalformedPayload("a required field was not given", field=column.name)
+            rendered = " " * column.length
+        else:
+            rendered = _writer_for(column.kind)(value, column.length)
+        if len(rendered) != column.length:
+            raise MalformedPayload(
+                "a value did not fit its field",
+                field=column.name,
+                width=column.length,
+                rendered=rendered,
+            )
+        line[column.start : column.end] = list(rendered)
+    return "".join(line)

@@ -12,6 +12,7 @@ from gussetline.collect.fixedwidth import (
     Record,
     RecordSpec,
     fields,
+    write_record,
 )
 from gussetline.errors import MalformedPayload
 
@@ -188,3 +189,82 @@ def test_a_day_and_time_that_is_not_digits_is_a_problem():
     spec = RecordSpec("S1", fields(("when", 2, 8, "daytime")))
     reading = Layout([spec]).read("S103MAR102\n")
     assert not reading.clean
+
+
+def test_a_record_written_back_reads_the_same_way():
+    line = write_record(
+        AMOUNT,
+        {"basis": "KLWAP7RT", "currency": "EUR", "amount": Decimal("420.00"), "seats": 2},
+    )
+    assert len(line) == 26
+    record = Layout([AMOUNT]).read(line).require("F1")
+    assert record["basis"] == "KLWAP7RT"
+    assert record["amount"] == Decimal("420.00")
+    assert record["seats"] == 2
+
+
+def test_a_header_round_trips_through_both_directions():
+    line = write_record(
+        HEADER,
+        {
+            "source": "GDSFARE",
+            "stamp": date(2025, 2, 14),
+            "origin": "FRA",
+            "destination": "JFK",
+        },
+    )
+    assert line == "H1GDSFARE 20250214FRAJFK"
+    assert Layout([HEADER]).read(line).require("H1")["stamp"] == date(2025, 2, 14)
+
+
+def test_an_optional_field_left_out_writes_as_spaces():
+    line = write_record(
+        AMOUNT, {"basis": "KLWAP7RT", "currency": "EUR", "amount": Decimal("420.00")}
+    )
+    assert line.endswith("  ")
+    assert "seats" not in Layout([AMOUNT]).read(line).require("F1")
+
+
+def test_a_required_field_left_out_is_refused():
+    with pytest.raises(MalformedPayload) as caught:
+        write_record(AMOUNT, {"basis": "KLWAP7RT", "currency": "EUR"})
+    assert caught.value.details["field"] == "amount"
+
+
+def test_a_negative_amount_round_trips():
+    spec = RecordSpec("A1", fields(("adjust", 2, 8, "amount")))
+    line = write_record(spec, {"adjust": Decimal("-12.50")})
+    assert line == "A1-0001250"
+    assert Layout([spec]).read(line).require("A1")["adjust"] == Decimal("-12.50")
+
+
+def test_a_zero_scale_amount_round_trips():
+    spec = RecordSpec("Y1", fields(("yen", 2, 6, "amount0")))
+    line = write_record(spec, {"yen": Decimal("18100")})
+    assert line == "Y1018100"
+    assert Layout([spec]).read(line).require("Y1")["yen"] == Decimal("18100")
+
+
+def test_a_day_and_time_round_trips():
+    spec = RecordSpec("S1", fields(("when", 2, 8, "daytime")))
+    line = write_record(spec, {"when": (3, 4, 10, 25)})
+    assert line == "S103041025"
+    assert Layout([spec]).read(line).require("S1")["when"] == (3, 4, 10, 25)
+
+
+def test_a_value_too_wide_for_its_field_is_truncated_for_text():
+    spec = RecordSpec("T1", fields(("code", 2, 3)))
+    assert write_record(spec, {"code": "TOOLONG"}) == "T1TOO"
+
+
+def test_a_number_too_wide_for_its_field_is_refused():
+    spec = RecordSpec("N1", fields(("count", 2, 2, "int")))
+    with pytest.raises(MalformedPayload):
+        write_record(spec, {"count": 1234})
+
+
+def test_a_field_kind_with_no_writer_is_refused():
+    spec = RecordSpec("X1", fields(("thing", 2, 4, "text")))
+    object.__setattr__(spec.fields[0], "kind", "nonsense")
+    with pytest.raises(MalformedPayload):
+        write_record(spec, {"thing": "abcd"})

@@ -1,5 +1,13 @@
 """Every table, imported here so the metadata is complete for a migration."""
 
+from gussetline.persistence.models.desk import (
+    CouponRow,
+    RecommendationRow,
+    RunResultRow,
+    RunRow,
+    TicketRow,
+    WatchRow,
+)
 from gussetline.persistence.models.market import (
     ObservationRow,
     QuoteRow,
@@ -27,6 +35,7 @@ __all__ = [
     "AirportRow",
     "CarrierRow",
     "CombinabilityRow",
+    "CouponRow",
     "FareRow",
     "InterlineRow",
     "LoadRow",
@@ -35,9 +44,14 @@ __all__ = [
     "ProvisionRow",
     "QuoteRow",
     "RateRow",
+    "RecommendationRow",
     "RoutingRow",
     "RuleRow",
+    "RunResultRow",
+    "RunRow",
     "SectorRow",
     "SurchargeRow",
     "TaxRow",
+    "TicketRow",
+    "WatchRow",
 ]

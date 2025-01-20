@@ -47,3 +47,34 @@ jobs:
 
       - name: tests
         run: pytest -q
+
+  migrations:
+    name: the migrations build the schema the models describe
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: install
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      # The suite already compares the migrated schema against the metadata.
+      # Running it on its own means a drift is a named failure rather than one
+      # red cross among a thousand.
+      - name: schema
+        run: pytest -q tests/test_migrations.py
+
+      - name: upgrade and downgrade a fresh database
+        env:
+          GUSSETLINE_DATABASE_URL: sqlite+pysqlite:///ci.sqlite3
+        run: |
+          alembic upgrade head
+          alembic downgrade base
+          alembic upgrade head

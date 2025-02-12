@@ -20,42 +20,16 @@ that is worth fighting with a pattern.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from html.parser import HTMLParser
 
+from gussetline.collect.harvest import Harvest, Quote
 from gussetline.errors import MalformedPayload
 from gussetline.geography import city_of
 from gussetline.money import Money
 
 SOURCE = "calendar"
-
-
-@dataclass(frozen=True, slots=True)
-class Quote:
-    """One advertised price for one departure date. No flights in it."""
-
-    origin: str
-    destination: str
-    departure: date
-    amount: Money
-    observed_at: datetime
-    carrier: str = ""
-    seats: int | None = None
-    sold_out: bool = False
-
-    @property
-    def market(self) -> tuple[str, str]:
-        return (self.origin, self.destination)
-
-    def cheaper_than(self, other: Quote) -> bool:
-        return self.amount < other.amount
-
-    def __str__(self) -> str:
-        if self.sold_out:
-            return f"{self.origin}{self.destination} {self.departure.isoformat()} sold out"
-        return f"{self.origin}{self.destination} {self.departure.isoformat()} {self.amount}"
 
 
 def read_price(text: str, currency: str) -> Money | None:
@@ -126,37 +100,7 @@ class _Grid(HTMLParser):
             self._text = []
 
 
-@dataclass
-class Reading:
-    """The quotes a page gave up, and the cells it could not read."""
-
-    quotes: list[Quote] = field(default_factory=list)
-    problems: list[str] = field(default_factory=list)
-
-    @property
-    def clean(self) -> bool:
-        return not self.problems
-
-    def cheapest(self) -> Quote | None:
-        live = [q for q in self.quotes if not q.sold_out]
-        if not live:
-            return None
-        return min(live, key=lambda q: (q.amount.amount, q.departure))
-
-    def on(self, day: date) -> Quote | None:
-        for quote in self.quotes:
-            if quote.departure == day:
-                return quote
-        return None
-
-    def __len__(self) -> int:
-        return len(self.quotes)
-
-    def __str__(self) -> str:
-        return f"{len(self.quotes)} quotes, {len(self.problems)} problems"
-
-
-def parse(payload: str | bytes, observed_at: datetime) -> Reading:
+def parse(payload: str | bytes, observed_at: datetime) -> Harvest:
     """Read a month grid into quotes."""
     text = payload.decode("utf-8", errors="replace") if isinstance(payload, bytes) else payload
     grid = _Grid()
@@ -168,23 +112,23 @@ def parse(payload: str | bytes, observed_at: datetime) -> Reading:
         raise MalformedPayload("the page does not say which currency it is in")
 
     origin, destination = city_of(grid.origin), city_of(grid.destination)
-    reading = Reading()
+    harvest = Harvest(source=SOURCE)
 
     for cell in grid.cells:
         raw_date = cell.get("data-date", "")
         try:
             departure = date.fromisoformat(raw_date)
         except ValueError:
-            reading.problems.append(f"cell with an unreadable date {raw_date!r}")
+            harvest.problems.append(f"cell with an unreadable date {raw_date!r}")
             continue
 
         sold_out = "sold-out" in cell.get("class", "") or not cell.get("_text", "").strip()
         amount = read_price(cell.get("data-amount", "") or cell.get("_text", ""), grid.currency)
         if amount is None and not sold_out:
-            reading.problems.append(f"cell on {raw_date} has no price we could read")
+            harvest.problems.append(f"cell on {raw_date} has no price we could read")
             continue
 
-        reading.quotes.append(
+        harvest.quotes.append(
             Quote(
                 origin=origin,
                 destination=destination,
@@ -197,7 +141,7 @@ def parse(payload: str | bytes, observed_at: datetime) -> Reading:
             )
         )
 
-    return reading
+    return harvest
 
 
 def _seats(raw: str) -> int | None:

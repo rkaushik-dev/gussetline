@@ -8,6 +8,7 @@ import pytest
 from conftest import segment
 from gussetline.collect.archive import Archive
 from gussetline.collect.breaker import BreakerBoard
+from gussetline.collect.harvest import Harvest
 from gussetline.collect.http import Response
 from gussetline.collect.limits import Limiter
 from gussetline.collect.registry import Outcome, default_registry
@@ -49,7 +50,7 @@ def parsers(offers=None, raises=None):
     def parse(payload, seen):
         if raises is not None:
             raise raises
-        return list(offers if offers is not None else [an_offer()])
+        return Harvest(offers=list(offers if offers is not None else [an_offer()]), source="gds")
 
     return {"gds": parse, "ndc": parse}
 

@@ -20,7 +20,8 @@ from dataclasses import field as dcfield
 from datetime import date, datetime
 from decimal import Decimal
 
-from gussetline.collect.fixedwidth import Layout, Reading, Record, RecordSpec, fields
+from gussetline.collect.fixedwidth import Layout, Record, RecordSpec, fields
+from gussetline.collect.harvest import Harvest
 from gussetline.errors import MalformedPayload, ValidationError
 from gussetline.flights import Cabin, Segment
 from gussetline.itinerary import Itinerary
@@ -190,7 +191,7 @@ class _Building:
         )
 
 
-def parse(payload: str | bytes, observed_at: datetime) -> list[Offer]:
+def parse(payload: str | bytes, observed_at: datetime) -> Harvest:
     """Read a whole gateway response into offers.
 
     An offer that cannot be assembled is dropped and the rest are kept,
@@ -198,12 +199,13 @@ def parse(payload: str | bytes, observed_at: datetime) -> list[Offer]:
     Tuesday and refusing the payload would lose the other eleven.
     """
     reading = LAYOUT.read(payload)
+    harvest = Harvest(source=SOURCE, problems=[str(p) for p in reading.problems])
     header = reading.require("H1")
     if header["source"] != "GDSFARE":
         raise MalformedPayload("not a pricing gateway payload", source=header["source"])
 
     year = header["stamp"].year
-    offers: list[Offer] = []
+    offers: list[Offer] = harvest.offers
     current: _Building | None = None
     roll = YearRoll(year)
 
@@ -237,16 +239,7 @@ def parse(payload: str | bytes, observed_at: datetime) -> list[Offer]:
         built = current.build(observed_at)
         if built is not None:
             offers.append(built)
-    return offers
-
-
-def problems(payload: str | bytes) -> list[str]:
-    """Everything the reader could not make sense of, for the run report."""
-    return [str(p) for p in LAYOUT.read(payload).problems]
-
-
-def reading_of(payload: str | bytes) -> Reading:
-    return LAYOUT.read(payload)
+    return harvest
 
 
 def amount_field(value: Decimal) -> str:

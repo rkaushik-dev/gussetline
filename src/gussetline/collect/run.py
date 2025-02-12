@@ -25,15 +25,15 @@ from decimal import Decimal
 
 from gussetline.collect.archive import Archive
 from gussetline.collect.breaker import BreakerBoard
+from gussetline.collect.harvest import Adapter
 from gussetline.collect.http import Response
 from gussetline.collect.limits import Limiter
 from gussetline.collect.registry import Outcome, Registry, Supplier, classify
 from gussetline.collect.schedule import Schedule, Task
 from gussetline.errors import GussetlineError
-from gussetline.offers import Offer
 
 Fetch = Callable[[Supplier, Task], Response]
-Parse = Callable[[bytes, datetime], list[Offer]]
+Parse = Adapter
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,16 +46,12 @@ class Result:
     digest: str = ""
     fresh: bool = True
     attempts: int = 0
+    problems: int = 0
     reason: str = ""
 
     @property
     def ok(self) -> bool:
         return self.outcome is Outcome.OK
-
-    @property
-    def called(self) -> bool:
-        """Whether a request actually went out, which is what a call costs."""
-        return self.outcome not in (Outcome.BUDGET, Outcome.BLOCKED) or self.attempts > 0
 
     def __str__(self) -> str:
         if self.ok:
@@ -88,6 +84,11 @@ class RunReport:
 
     def failures(self) -> list[Result]:
         return [r for r in self.results if not r.ok]
+
+    @property
+    def problems(self) -> int:
+        """Payload level problems, which used to be dropped on the floor."""
+        return sum(r.problems for r in self.results)
 
     def cost(self, registry: Registry) -> Decimal:
         """What the run spent, counting only the calls that went out."""
@@ -204,7 +205,7 @@ class Collector:
             )
 
         try:
-            offers = parser(response.body, seen)
+            harvest = parser(response.body, seen)
         except GussetlineError as exc:
             self.breakers.succeeded(supplier.name)
             return Result(
@@ -220,26 +221,14 @@ class Collector:
         if schedule is not None:
             series = schedule.get(task.market, task.departure)
             if series is not None:
-                series.record(today, _cheapest_amount(offers))
+                series.record(today, harvest.cheapest_amount())
 
         return Result(
             task,
             Outcome.OK,
-            offers=len(offers),
+            offers=len(harvest),
+            problems=len(harvest.problems),
             digest=sighting.digest,
             fresh=sighting.fresh,
             attempts=response.attempts,
         )
-
-
-def _cheapest_amount(offers: list[Offer]) -> str:
-    """The lowest total in a batch, as text, for the quiet market check.
-
-    Text rather than a number because the schedule only ever compares it for
-    equality, and comparing two amounts in different currencies as numbers
-    would silently succeed.
-    """
-    if not offers:
-        return ""
-    cheapest = min(offers, key=lambda o: o.total.amount)
-    return str(cheapest.total)

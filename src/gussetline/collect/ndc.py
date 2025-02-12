@@ -21,11 +21,11 @@ absent everywhere and the caller decides what absent means for that field.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
+from gussetline.collect.harvest import Harvest
 from gussetline.errors import MalformedPayload
 from gussetline.flights import Cabin, Segment
 from gussetline.itinerary import Itinerary
@@ -131,24 +131,6 @@ def when(value: Any) -> datetime | None:
         return None
 
 
-@dataclass
-class Reading:
-    """What came out, and what could not be read."""
-
-    offers: list[Offer] = field(default_factory=list)
-    problems: list[str] = field(default_factory=list)
-
-    @property
-    def clean(self) -> bool:
-        return not self.problems
-
-    def __len__(self) -> int:
-        return len(self.offers)
-
-    def __str__(self) -> str:
-        return f"{len(self.offers)} offers, {len(self.problems)} problems"
-
-
 def _segment(node: Any) -> Segment | None:
     departure = when(pick(node, "departureTime", "departure"))
     arrival = when(pick(node, "arrivalTime", "arrival"))
@@ -193,7 +175,7 @@ def _taxes(node: Any, fallback: str) -> list[AppliedTax]:
     return found
 
 
-def parse(payload: str | bytes, observed_at: datetime) -> Reading:
+def parse(payload: str | bytes, observed_at: datetime) -> Harvest:
     """Read an offer feed response, keeping what it could not use."""
     try:
         document = json.loads(payload)
@@ -205,18 +187,18 @@ def parse(payload: str | bytes, observed_at: datetime) -> Reading:
     if not entries:
         raise MalformedPayload("the payload carries no offers")
 
-    reading = Reading()
+    harvest = Harvest(source=SOURCE)
     for index, entry in enumerate(entries):
         try:
             offer = _offer(entry, observed_at)
         except MalformedPayload as exc:
-            reading.problems.append(f"offer {index}: {exc.message}")
+            harvest.problems.append(f"offer {index}: {exc.message}")
             continue
         if offer is None:
-            reading.problems.append(f"offer {index}: could not be assembled")
+            harvest.problems.append(f"offer {index}: could not be assembled")
             continue
-        reading.offers.append(offer)
-    return reading
+        harvest.offers.append(offer)
+    return harvest
 
 
 def _offer(entry: Any, observed_at: datetime) -> Offer | None:

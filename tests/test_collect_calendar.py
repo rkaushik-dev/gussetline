@@ -4,7 +4,8 @@ from datetime import date, datetime
 
 import pytest
 
-from gussetline.collect.calendar import Quote, parse, read_price
+from gussetline.collect.calendar import parse, read_price
+from gussetline.collect.harvest import Quote
 from gussetline.errors import MalformedPayload
 from gussetline.money import Money
 
@@ -158,7 +159,7 @@ def test_a_month_of_cells_reads_as_a_month_of_quotes():
 def test_the_cheapest_live_quote_is_found():
     cells = cell(day="2025-06-04", amount="420") + cell(day="2025-06-05", amount="380")
     reading = parse(page(cells), SEEN)
-    cheapest = reading.cheapest()
+    cheapest = reading.cheapest_quote()
     assert cheapest is not None
     assert cheapest.departure == date(2025, 6, 5)
 
@@ -167,23 +168,23 @@ def test_a_sold_out_day_is_never_the_cheapest():
     cells = cell(day="2025-06-04", amount="420") + cell(
         day="2025-06-05", amount="", text="", cls="fare-day sold-out"
     )
-    cheapest = parse(page(cells), SEEN).cheapest()
+    cheapest = parse(page(cells), SEEN).cheapest_quote()
     assert cheapest is not None
     assert cheapest.departure == date(2025, 6, 4)
 
 
 def test_a_page_where_everything_is_sold_out_has_no_cheapest():
     cells = cell(day="2025-06-04", amount="", text="", cls="fare-day sold-out")
-    assert parse(page(cells), SEEN).cheapest() is None
+    assert parse(page(cells), SEEN).cheapest_quote() is None
 
 
 def test_a_particular_day_can_be_looked_up():
     cells = cell(day="2025-06-04") + cell(day="2025-06-05", amount="380")
     reading = parse(page(cells), SEEN)
-    found = reading.on(date(2025, 6, 5))
+    found = reading.quote_on(date(2025, 6, 5))
     assert found is not None
     assert found.amount == Money.of("380", "EUR")
-    assert reading.on(date(2025, 7, 1)) is None
+    assert reading.quote_on(date(2025, 7, 1)) is None
 
 
 def test_two_quotes_compare_on_their_amounts():

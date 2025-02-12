@@ -15,7 +15,6 @@ from gussetline.collect.gds import (
     TAX,
     YearRoll,
     parse,
-    problems,
 )
 from gussetline.errors import MalformedPayload
 from gussetline.flights import Cabin
@@ -157,7 +156,7 @@ def test_a_payload_with_no_header_is_refused():
 
 
 def test_a_simple_response_gives_one_offer():
-    offers = parse(SIMPLE, SEEN)
+    offers = parse(SIMPLE, SEEN).offers
     assert len(offers) == 1
     assert offers[0].source == "gds"
     assert offers[0].origin == "FRA"
@@ -165,7 +164,7 @@ def test_a_simple_response_gives_one_offer():
 
 
 def test_the_sectors_come_back_as_a_joined_itinerary():
-    offer = parse(SIMPLE, SEEN)[0]
+    offer = parse(SIMPLE, SEEN).offers[0]
     assert len(offer.itinerary.segments) == 2
     assert offer.itinerary.segments[0].designator == "LH400"
     assert offer.itinerary.segments[0].departure == datetime(2025, 3, 4, 10, 25)
@@ -173,32 +172,32 @@ def test_the_sectors_come_back_as_a_joined_itinerary():
 
 
 def test_the_fare_components_add_into_the_base():
-    offer = parse(SIMPLE, SEEN)[0]
+    offer = parse(SIMPLE, SEEN).offers[0]
     assert offer.breakdown.base == Money.of("840.00", "EUR")
     assert offer.fare_bases == ("KLWAP7RT", "KLWAP7RT")
 
 
 def test_the_taxes_come_across_and_yq_is_marked_as_carrier_money():
-    offer = parse(SIMPLE, SEEN)[0]
+    offer = parse(SIMPLE, SEEN).offers[0]
     assert offer.breakdown.tax_total == Money.of("70.83", "EUR")
     assert offer.breakdown.surcharge_total == Money.of("180.00", "EUR")
 
 
 def test_the_gateways_own_total_is_kept_beside_ours():
-    offer = parse(SIMPLE, SEEN)[0]
+    offer = parse(SIMPLE, SEEN).offers[0]
     assert offer.breakdown.quoted_total == Money.of("1090.83", "EUR")
     assert offer.breakdown.adds_up
 
 
 def test_a_total_that_disagrees_is_kept_and_not_corrected():
     other = SIMPLE.replace(end(amount="1090.83"), end(amount="1200.00"))
-    offer = parse(other, SEEN)[0]
+    offer = parse(other, SEEN).offers[0]
     assert offer.breakdown.quoted_total == Money.of("1200.00", "EUR")
     assert not offer.breakdown.adds_up
 
 
 def test_the_seat_and_bag_counts_come_off_the_offer_record():
-    offer = parse(SIMPLE, SEEN)[0]
+    offer = parse(SIMPLE, SEEN).offers[0]
     assert offer.seats == 4
     assert offer.baggage.pieces == 1
 
@@ -211,7 +210,7 @@ def test_an_offer_record_with_no_counts_leaves_them_unstated():
         component(),
         end(amount="490.83"),
     )
-    offer = parse(thin, SEEN)[0]
+    offer = parse(thin, SEEN).offers[0]
     assert offer.seats is None
     assert not offer.baggage.is_stated
 
@@ -228,7 +227,7 @@ def test_two_offer_records_give_two_offers():
         component(basis="QLWAP14RT", amount="380.00"),
         end(amount="450.83"),
     )
-    offers = parse(two, SEEN)
+    offers = parse(two, SEEN).offers
     assert len(offers) == 2
     assert offers[1].carriers == ("BA",)
     assert offers[1].fare_bases == ("QLWAP14RT",)
@@ -238,7 +237,7 @@ def test_a_codeshare_keeps_both_carriers():
     shared = payload(
         header(), offer_line(), sector(operating="UA"), component(), end(amount="490.83")
     )
-    segment = parse(shared, SEEN)[0].itinerary.segments[0]
+    segment = parse(shared, SEEN).offers[0].itinerary.segments[0]
     assert segment.marketing_carrier == "LH"
     assert segment.operated_by == "UA"
     assert segment.is_codeshare
@@ -252,12 +251,12 @@ def test_the_cabin_is_read_off_the_sector():
         component(basis="JRT", amount="2900.00"),
         end(amount="2970.83"),
     )
-    assert parse(business, SEEN)[0].cabin is Cabin.BUSINESS
+    assert parse(business, SEEN).offers[0].cabin is Cabin.BUSINESS
 
 
 def test_a_cabin_the_tariff_does_not_price_falls_back_to_economy():
     odd = payload(header(), offer_line(), sector(cabin="Z"), component(), end(amount="490.83"))
-    assert parse(odd, SEEN)[0].cabin is Cabin.ECONOMY
+    assert parse(odd, SEEN).offers[0].cabin is Cabin.ECONOMY
 
 
 def test_a_broken_offer_is_dropped_and_the_others_survive():
@@ -273,35 +272,54 @@ def test_a_broken_offer_is_dropped_and_the_others_survive():
         component(),
         end(amount="490.83"),
     )
-    offers = parse(mixed, SEEN)
+    offers = parse(mixed, SEEN).offers
     assert len(offers) == 1
 
 
 def test_an_offer_with_no_fare_component_is_dropped():
     thin = payload(header(), offer_line(), sector(), end(amount="0.00"))
-    assert parse(thin, SEEN) == []
+    assert parse(thin, SEEN).offers == []
 
 
 def test_records_before_the_first_offer_record_are_ignored():
     stray = payload(header(), sector(), offer_line(), sector(), component(), end())
-    offers = parse(stray, SEEN)
+    offers = parse(stray, SEEN).offers
     assert len(offers) == 1
     assert len(offers[0].itinerary.segments) == 1
 
 
 def test_an_unknown_record_is_reported_and_does_not_stop_the_read():
     with_junk = payload(header(), "Z9nonsense", offer_line(), sector(), component(), end())
-    assert len(parse(with_junk, SEEN)) == 1
-    assert any("unknown record tag" in p for p in problems(with_junk))
+    assert len(parse(with_junk, SEEN).offers) == 1
+    assert any("unknown record tag" in p for p in parse(with_junk, SEEN).problems)
 
 
 def test_a_clean_payload_reports_no_problems():
-    assert problems(SIMPLE) == []
+    assert parse(SIMPLE, SEEN).problems == []
+    assert parse(SIMPLE, SEEN).clean
 
 
 def test_a_flight_number_loses_its_padding():
-    assert parse(SIMPLE, SEEN)[0].itinerary.segments[0].flight_number == "400"
+    assert parse(SIMPLE, SEEN).offers[0].itinerary.segments[0].flight_number == "400"
 
 
 def test_the_observation_time_is_ours_and_not_the_payloads():
-    assert parse(SIMPLE, SEEN)[0].observed_at == SEEN
+    assert parse(SIMPLE, SEEN).offers[0].observed_at == SEEN
+
+
+def test_the_problems_ride_along_on_the_harvest_instead_of_being_dropped():
+    # This is what the fold was for. The gateway adapter used to hand back a
+    # bare list and the problems were only visible to a test.
+    with_junk = payload(header(), "Z9nonsense", offer_line(), sector(), component(), end())
+    harvest = parse(with_junk, SEEN)
+    assert len(harvest.offers) == 1
+    assert len(harvest.problems) == 1
+    assert not harvest.clean
+    assert harvest.source == "gds"
+
+
+def test_a_gateway_harvest_carries_no_quotes():
+    harvest = parse(SIMPLE, SEEN)
+    assert harvest.quotes == []
+    assert harvest.cheapest_quote() is None
+    assert harvest.cheapest_offer() is not None

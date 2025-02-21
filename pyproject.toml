@@ -14,6 +14,9 @@ dependencies = [
   "httpx==0.28.1",
   "SQLAlchemy==2.0.38",
   "alembic==1.14.1",
+  "fastapi==0.115.8",
+  "pydantic==2.10.6",
+  "uvicorn[standard]==0.34.0",
 ]
 
 [project.optional-dependencies]
@@ -30,6 +33,11 @@ where = ["src"]
 testpaths = ["tests"]
 pythonpath = ["src"]
 addopts = "-q"
+filterwarnings = [
+  # Starlette's test client still reaches for an anyio alias that anyio has
+  # deprecated. Not ours to fix and not worth reading on every run.
+  "ignore:The anyio.abc.BlockingPortal alias is deprecated:DeprecationWarning",
+]
 
 [tool.ruff]
 # The formatter and the linter share this. A hundred fits a fare construction
@@ -55,6 +63,9 @@ known-first-party = ["gussetline", "conftest"]
 # else. Binding the result to a throwaway name to quiet the linter makes the
 # test read as if the value mattered, which is the opposite of the point.
 "tests/*" = ["B015", "B018"]
+# Routes declare their query parameters and bodies as call defaults. That is
+# the framework's calling convention and there is no way to write it otherwise.
+"src/gussetline/api/*" = ["B008"]
 
 [tool.mypy]
 python_version = "3.11"

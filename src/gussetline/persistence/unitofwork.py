@@ -20,6 +20,7 @@ from typing import Any
 
 from sqlalchemy import Engine, create_engine, event
 from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.pool import StaticPool
 
 from gussetline.config import Settings
 from gussetline.persistence.base import Base
@@ -34,8 +35,25 @@ from gussetline.persistence.repositories import (
 
 
 def make_engine(settings: Settings, echo: bool = False) -> Engine:
-    """An engine with the pragma SQLite needs to mean what the schema says."""
-    engine = create_engine(settings.database_url, echo=echo, future=True)
+    """An engine with the pragma SQLite needs to mean what the schema says.
+
+    An in memory database also needs a static pool. Without one every
+    connection gets its own empty database, so a schema built on the first
+    connection is invisible to the second, and anything that opens a session
+    on another thread reports that no table exists. That is the shape of the
+    bug the http tests found: the schema was there and the reader was looking
+    at a different database of the same name.
+    """
+    if settings.in_memory:
+        engine = create_engine(
+            settings.database_url,
+            echo=echo,
+            future=True,
+            poolclass=StaticPool,
+            connect_args={"check_same_thread": False},
+        )
+    else:
+        engine = create_engine(settings.database_url, echo=echo, future=True)
 
     if settings.is_sqlite:
 

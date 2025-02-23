@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends
 
+from gussetline.api import security
 from gussetline.api.deps import get_settings, get_unit
 from gussetline.api.schemas import (
     ChargeOut,
@@ -29,7 +30,7 @@ from gussetline.itinerary import Itinerary
 from gussetline.persistence.unitofwork import UnitOfWork
 from gussetline.tariff import TariffStore
 
-router = APIRouter(prefix="/pricing", tags=["pricing"])
+router = APIRouter(prefix="/pricing", tags=["pricing"], dependencies=[Depends(security.reader)])
 
 
 @router.post("", response_model=PriceOut)

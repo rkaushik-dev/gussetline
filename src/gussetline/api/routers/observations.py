@@ -12,6 +12,7 @@ from datetime import date
 
 from fastapi import APIRouter, Depends, Query
 
+from gussetline.api import security
 from gussetline.api.deps import get_unit
 from gussetline.api.schemas import MoneyOut, OfferOut, SectorOut, SeriesOut, TaxOut
 from gussetline.errors import NotFoundError
@@ -19,7 +20,9 @@ from gussetline.offers import Offer
 from gussetline.persistence.mappers import series_key_of
 from gussetline.persistence.unitofwork import UnitOfWork
 
-router = APIRouter(prefix="/observations", tags=["observations"])
+router = APIRouter(
+    prefix="/observations", tags=["observations"], dependencies=[Depends(security.reader)]
+)
 
 
 def offer_out(offer: Offer, sightings: int = 1) -> OfferOut:

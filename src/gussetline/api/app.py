@@ -20,6 +20,7 @@ from fastapi import FastAPI, Request, Response
 
 from gussetline.api import errors
 from gussetline.api.routers import health, observations, pricing, sources, watches
+from gussetline.api.security import KeyRing
 from gussetline.config import Settings
 from gussetline.persistence.unitofwork import Database
 
@@ -27,7 +28,7 @@ TITLE = "gussetline"
 VERSION = "0.1.0"
 
 
-def create_app(settings: Settings, database: Database) -> FastAPI:
+def create_app(settings: Settings, database: Database, keyring: KeyRing | None = None) -> FastAPI:
     """Build the application around one settings object and one database."""
     app = FastAPI(
         title=TITLE,
@@ -39,6 +40,8 @@ def create_app(settings: Settings, database: Database) -> FastAPI:
 
     app.state.settings = settings
     app.state.database = database
+    # No ring means no authentication, which is what a test and a laptop want.
+    app.state.keyring = keyring
 
     @app.middleware("http")
     async def _request_id(

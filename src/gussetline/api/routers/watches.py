@@ -12,13 +12,14 @@ from datetime import date
 
 from fastapi import APIRouter, Depends, Query
 
+from gussetline.api import security
 from gussetline.api.deps import get_unit
 from gussetline.api.schemas import DecisionIn, MoneyOut, RecommendationOut, WatchOut
 from gussetline.errors import ConflictError, NotFoundError
 from gussetline.persistence.models import RecommendationRow, WatchRow
 from gussetline.persistence.unitofwork import UnitOfWork
 
-router = APIRouter(prefix="/watches", tags=["watches"])
+router = APIRouter(prefix="/watches", tags=["watches"], dependencies=[Depends(security.reader)])
 
 
 def watch_out(row: WatchRow) -> WatchOut:
@@ -82,7 +83,11 @@ def read_recommendation(identifier: int, work: UnitOfWork = Depends(get_unit)) -
     return recommendation_out(_recommendation(work, identifier))
 
 
-@router.post("/recommendations/{identifier}/take", response_model=RecommendationOut)
+@router.post(
+    "/recommendations/{identifier}/take",
+    response_model=RecommendationOut,
+    dependencies=[Depends(security.agent)],
+)
 def take_recommendation(
     identifier: int,
     decision: DecisionIn,
@@ -92,7 +97,11 @@ def take_recommendation(
     return _settle(work, identifier, "taken", decision)
 
 
-@router.post("/recommendations/{identifier}/kill", response_model=RecommendationOut)
+@router.post(
+    "/recommendations/{identifier}/kill",
+    response_model=RecommendationOut,
+    dependencies=[Depends(security.agent)],
+)
 def kill_recommendation(
     identifier: int,
     decision: DecisionIn,

@@ -19,6 +19,7 @@ from typing import Any
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
+from gussetline.api.security import Forbidden, Unauthorised
 from gussetline.errors import (
     BudgetExhausted,
     ConfigError,
@@ -34,6 +35,8 @@ from gussetline.errors import (
 
 # The one place an exception becomes a status code.
 STATUS_FOR: tuple[tuple[type[GussetlineError], int], ...] = (
+    (Unauthorised, 401),
+    (Forbidden, 403),
     (NotFoundError, 404),
     (ConflictError, 409),
     (ValidationError, 422),

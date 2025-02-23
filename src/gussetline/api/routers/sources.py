@@ -13,13 +13,16 @@ import os
 
 from fastapi import APIRouter, Depends
 
+from gussetline.api import security
 from gussetline.api.deps import get_settings
 from gussetline.api.schemas import SupplierOut
 from gussetline.collect.registry import default_registry
 from gussetline.config import Settings
 from gussetline.errors import NotFoundError
 
-router = APIRouter(prefix="/sources", tags=["sources"])
+# Operator only. The quota and the cost per call are commercial and the
+# fares are not.
+router = APIRouter(prefix="/sources", tags=["sources"], dependencies=[Depends(security.operator)])
 
 
 @router.get("", response_model=list[SupplierOut])

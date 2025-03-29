@@ -11,6 +11,7 @@ from gussetline.desk.recommend import (
     Recommendation,
     State,
     expire_stale,
+    open_on,
     open_ones,
     raise_from,
     realised_total,
@@ -237,7 +238,7 @@ def test_nothing_settled_saves_nothing():
     assert realised_total([recommendation()], "EUR") == Money.zero("EUR")
 
 
-def test_the_take_rate_is_measured_against_the_settled_ones():
+def test_the_take_rate_is_measured_against_the_ones_a_person_decided():
     taken = recommendation()
     taken.take(TODAY, "anna")
     killed = recommendation()
@@ -246,17 +247,70 @@ def test_the_take_rate_is_measured_against_the_settled_ones():
     assert take_rate([taken, killed, still_open]) == Decimal("0.50")
 
 
-def test_the_take_rate_of_nothing_settled_is_nothing():
+def test_the_take_rate_of_nothing_decided_is_nothing():
     assert take_rate([]) == Decimal(0)
     assert take_rate([recommendation()]) == Decimal(0)
 
 
-def test_an_expired_recommendation_counts_against_the_take_rate():
+def test_an_expired_recommendation_is_nobody_decision_and_is_left_out():
+    # The clock settled it. Counting it as a refusal makes the take rate fall
+    # when the desk is short staffed rather than when it is choosing badly.
     taken = recommendation()
     taken.take(TODAY, "anna")
     expired = recommendation()
     expired.expire(date(2025, 6, 28))
-    assert take_rate([taken, expired]) == Decimal("0.50")
+    assert take_rate([taken, expired]) == Decimal("1.00")
+
+
+def test_a_withdrawn_recommendation_is_left_out_of_the_take_rate_too():
+    taken = recommendation()
+    taken.take(TODAY, "anna")
+    replaced = recommendation()
+    replaced.withdraw(TODAY, "abc123")
+    assert take_rate([taken, replaced]) == Decimal("1.00")
+
+
+def test_withdrawing_names_the_fare_that_replaced_it_and_nobody_else():
+    made = recommendation()
+    made.withdraw(TODAY, "abc123")
+    assert made.state is State.SUPERSEDED
+    assert made.state.is_settled
+    assert not made.state.counts_as_saving
+    assert not made.state.a_person_decided
+    assert made.decided_by == "a better fare"
+    assert made.replaced_by == "abc123"
+    assert made.realised == Money.zero("EUR")
+
+
+def test_a_settled_recommendation_cannot_be_withdrawn():
+    made = recommendation()
+    made.kill(TODAY, "anna")
+    with pytest.raises(ConflictError):
+        made.withdraw(TODAY)
+
+
+def test_a_withdrawn_recommendation_cannot_then_be_taken():
+    made = recommendation()
+    made.withdraw(TODAY)
+    with pytest.raises(ConflictError):
+        made.take(TODAY, "anna")
+
+
+def test_the_open_one_on_a_series_is_the_newest_of_them():
+    old = recommendation()
+    old.raised_on = date(2025, 6, 20)
+    new = recommendation()
+    new.raised_on = date(2025, 6, 27)
+    settled = recommendation()
+    settled.take(TODAY, "anna")
+    assert open_on([old, new, settled], old.series_key) is new
+
+
+def test_a_series_with_nothing_open_has_nothing_to_supersede():
+    made = recommendation()
+    made.take(TODAY, "anna")
+    assert open_on([made], made.series_key) is None
+    assert open_on([], "FRA-NYC-2025-08-04-Y") is None
 
 
 def test_a_retained_residual_carries_through_to_the_recommendation():

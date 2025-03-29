@@ -30,6 +30,8 @@ def made(benefit="90.00", raised_on=JUNE, **over) -> Recommendation:
         row.kill(raised_on, over.get("by", "anna"))
     elif state is State.EXPIRED:
         row.expire(raised_on)
+    elif state is State.SUPERSEDED:
+        row.withdraw(raised_on)
     return row
 
 
@@ -81,7 +83,7 @@ def test_an_open_recommendation_is_in_found_and_nowhere_else():
     assert report.overall.still_open == 1
 
 
-def test_the_take_rate_is_measured_against_the_settled_ones():
+def test_the_take_rate_is_measured_against_the_ones_a_person_decided():
     report = build(
         [
             made(state=State.TAKEN),
@@ -91,11 +93,48 @@ def test_the_take_rate_is_measured_against_the_settled_ones():
         "EUR",
     )
     assert report.overall.settled == 2
+    assert report.overall.decided == 2
     assert report.overall.take_rate == Decimal("0.50")
 
 
-def test_nothing_settled_gives_no_take_rate_rather_than_a_division():
+def test_nothing_decided_gives_no_take_rate_rather_than_a_division():
     assert build([made()], "EUR").overall.take_rate == Decimal(0)
+
+
+def test_a_superseded_recommendation_is_settled_but_nobody_decided_it():
+    report = build([made(state=State.TAKEN), made(state=State.SUPERSEDED)], "EUR")
+    assert report.overall.settled == 2
+    assert report.overall.decided == 1
+    assert report.overall.superseded == 1
+    assert report.overall.take_rate == Decimal("1.00")
+
+
+def test_a_superseded_recommendation_is_in_found_and_in_nothing_else():
+    report = build([made("40.00", state=State.SUPERSEDED)], "EUR")
+    assert report.overall.found == Money.of("40.00", "EUR")
+    assert report.overall.realised == Money.zero("EUR")
+    assert report.overall.missed == Money.zero("EUR")
+    assert report.overall.still_open == 0
+
+
+def test_a_superseded_recommendation_belongs_to_no_agent():
+    report = build([made(state=State.SUPERSEDED), made(state=State.TAKEN, by="anna")], "EUR")
+    assert [line.label for line in report.by_agent] == ["anna"]
+
+
+def test_the_counts_still_add_up_to_what_was_raised():
+    report = build(
+        [
+            made(state=State.TAKEN),
+            made(state=State.KILLED),
+            made(state=State.EXPIRED),
+            made(state=State.SUPERSEDED),
+            made(),
+        ],
+        "EUR",
+    )
+    line = report.overall
+    assert line.settled + line.still_open == line.raised
 
 
 def test_the_rows_are_grouped_by_month():
@@ -162,7 +201,7 @@ def test_the_rendered_report_carries_all_three_numbers():
     assert "found     200.00 EUR" in out
     assert "taken     90.00 EUR" in out
     assert "missed    70.00 EUR" in out
-    assert "take rate 0.50" in out
+    assert "take rate 1.00 over 1 decided" in out
 
 
 def test_the_rendered_report_leaves_out_the_groupings_when_there_are_none():

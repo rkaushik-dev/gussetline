@@ -14,6 +14,13 @@ Expiry is the part worth stating. A recommendation raised on Monday against a
 fare that was gone by Wednesday is not a saving and is not a failure either,
 it is the ordinary case, and counting it as either makes the desk look better
 or worse than it is.
+
+Withdrawal is the other one. The market can drop again while a recommendation
+is still sitting in somebody's queue, and the desk then has two open numbers
+for one ticket and one phone call to make. The old one is withdrawn rather
+than killed, because killed means a person looked at it and said no, and a
+report that cannot tell those apart will show a take rate falling every time
+the collectors do their job well.
 """
 
 from __future__ import annotations
@@ -37,6 +44,7 @@ class State(str, Enum):
     TAKEN = "taken"
     KILLED = "killed"
     EXPIRED = "expired"
+    SUPERSEDED = "superseded"
 
     @property
     def is_settled(self) -> bool:
@@ -45,6 +53,16 @@ class State(str, Enum):
     @property
     def counts_as_saving(self) -> bool:
         return self is State.TAKEN
+
+    @property
+    def a_person_decided(self) -> bool:
+        """Whether a human settled this, which is what a take rate measures.
+
+        The clock and the collectors settle recommendations too, and counting
+        those against the desk means the take rate moves when nobody on the
+        desk has done anything at all.
+        """
+        return self in (State.TAKEN, State.KILLED)
 
 
 @dataclass
@@ -65,6 +83,7 @@ class Recommendation:
     decided_on: date | None = None
     decided_by: str = ""
     note: str = ""
+    replaced_by: str = ""
     lifetime_days: int = DEFAULT_LIFETIME_DAYS
 
     def __post_init__(self) -> None:
@@ -100,6 +119,20 @@ class Recommendation:
         self.state = State.EXPIRED
         self.decided_on = today
         self.decided_by = "the clock"
+
+    def withdraw(self, today: date, fingerprint: str = "") -> None:
+        """A better one on the same series has replaced this.
+
+        Not killed, because nobody looked at it, and not expired, because the
+        fare it was raised on may still be there. It simply is not the number
+        the desk should be quoting any more.
+        """
+        if self.state is not State.OPEN:
+            raise ConflictError("only an open recommendation is withdrawn", state=self.state.value)
+        self.state = State.SUPERSEDED
+        self.decided_on = today
+        self.decided_by = "a better fare"
+        self.replaced_by = fingerprint
 
     def _settle(self, state: State, today: date, by: str, note: str) -> None:
         if self.state is not State.OPEN:
@@ -168,6 +201,19 @@ def open_ones(recommendations: list[Recommendation]) -> list[Recommendation]:
     return [r for r in recommendations if r.state is State.OPEN]
 
 
+def open_on(recommendations: list[Recommendation], series_key: str) -> Recommendation | None:
+    """The open recommendation for a series, if the desk already has one.
+
+    There is at most one by construction, and the session is what keeps that
+    true. Returning the newest rather than the first means a run that somehow
+    left two behind still supersedes the one a person would be looking at.
+    """
+    found = [r for r in open_ones(recommendations) if r.series_key == series_key]
+    if not found:
+        return None
+    return max(found, key=lambda r: r.raised_on)
+
+
 def realised_total(recommendations: list[Recommendation], currency: str) -> Money:
     running = Money.zero(currency)
     for recommendation in recommendations:
@@ -177,14 +223,15 @@ def realised_total(recommendations: list[Recommendation], currency: str) -> Mone
 
 
 def take_rate(recommendations: list[Recommendation]) -> Decimal:
-    """How often a settled recommendation was acted on.
+    """How often a recommendation a person decided was acted on.
 
-    Measured against the settled ones and not against everything, because an
-    open recommendation has not been decided yet and counting it as a refusal
-    makes the desk look worse every morning and better every afternoon.
+    Measured against the ones a person decided and not against everything.
+    An open recommendation has not been decided yet, and counting it as a
+    refusal makes the desk look worse every morning and better every
+    afternoon. An expired or withdrawn one was never a person's to decide.
     """
-    settled = [r for r in recommendations if r.state.is_settled]
-    if not settled:
+    decided = [r for r in recommendations if r.state.a_person_decided]
+    if not decided:
         return Decimal(0)
-    taken = sum(1 for r in settled if r.state.counts_as_saving)
-    return (Decimal(taken) / Decimal(len(settled))).quantize(Decimal("0.01"))
+    taken = sum(1 for r in decided if r.state.counts_as_saving)
+    return (Decimal(taken) / Decimal(len(decided))).quantize(Decimal("0.01"))

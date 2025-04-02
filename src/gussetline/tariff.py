@@ -161,6 +161,42 @@ class TariffStore:
         for fare in fares:
             self.add(fare)
 
+    def remove(self, fare: Fare) -> bool:
+        """Drop a fare the carrier has withdrawn. Says whether it was there.
+
+        Matched on the key and on the effective date together, because a
+        carrier files the same fare basis over and over with new windows and
+        a withdrawal names exactly one of them. Matching on the key alone
+        deletes a fare that is still on sale next month.
+        """
+        market = (fare.carrier, fare.origin, fare.destination)
+        held = self._by_market.get(market)
+        if not held:
+            return False
+        wanted = fare.key()
+        kept = [f for f in held if not (f.key() == wanted and f.effective == fare.effective)]
+        if len(kept) == len(held):
+            return False
+        self._count -= len(held) - len(kept)
+        if kept:
+            self._by_market[market] = kept
+        else:
+            del self._by_market[market]
+        return True
+
+    def replace(self, fare: Fare) -> bool:
+        """Put a fare in, dropping any it amends. Says whether it replaced one."""
+        replaced = self.remove(fare)
+        self.add(fare)
+        return replaced
+
+    def all_fares(self) -> list[Fare]:
+        """Everything held, in a settled order, for a dump or a check."""
+        found: list[Fare] = []
+        for market in sorted(self._by_market):
+            found.extend(sorted(self._by_market[market], key=lambda f: (f.fare_basis, f.effective)))
+        return found
+
     def __len__(self) -> int:
         return self._count
 

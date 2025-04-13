@@ -227,6 +227,19 @@ class RuleStore:
         except NoRuleFound:
             return None
 
+    def remove(self, carrier: str, number: str, tariff: str = "1") -> bool:
+        """Drop a rule the carrier has withdrawn. Says whether it was there."""
+        key = (normalise_code(carrier), number.strip(), tariff.strip())
+        if key not in self._rules:
+            return False
+        del self._rules[key]
+        return True
+
+    def numbers(self, carrier: str) -> list[str]:
+        """Every rule number held for one carrier, for a dump or a check."""
+        code = normalise_code(carrier)
+        return sorted(number for held, number, _ in self._rules if held == code)
+
     def __len__(self) -> int:
         return len(self._rules)
 

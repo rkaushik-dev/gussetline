@@ -123,6 +123,18 @@ def check(desk: Desk) -> None:
     click.echo(f"observations  {observations}")
 
 
+def _register() -> None:
+    """Hang the command groups off the root.
+
+    Done here rather than at the top of the file because every group imports
+    Desk and pass_desk from this module, and importing them at the top would
+    be a cycle. The call is at the bottom, after both exist.
+    """
+    from gussetline.cli.load import load
+
+    cli.add_command(load)
+
+
 def main() -> int:
     """The entry point, which turns a failure into the right code."""
     try:
@@ -137,6 +149,9 @@ def main() -> int:
         click.echo(str(exc), err=True)
         return exit_code_for(exc)
     return OK
+
+
+_register()
 
 
 if __name__ == "__main__":  # pragma: no cover

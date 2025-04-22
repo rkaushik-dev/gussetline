@@ -14,9 +14,12 @@ because nothing reads it until the day something does.
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 
 from gussetline.carriers import Alliance, Carrier
+from gussetline.collect.registry import Outcome
+from gussetline.collect.run import Result, RunReport
+from gussetline.collect.schedule import Market, Task
 from gussetline.flights import Cabin, Segment
 from gussetline.geography import Airport
 from gussetline.indicators import GlobalIndicator
@@ -28,6 +31,8 @@ from gussetline.persistence.models import (
     CarrierRow,
     FareRow,
     ObservationRow,
+    RunResultRow,
+    RunRow,
     SectorRow,
     TaxRow,
 )
@@ -245,3 +250,71 @@ def row_to_offer(row: ObservationRow) -> Offer:
 def series_key_of(origin: str, destination: str, departure: date, cabin: str) -> str:
     """The key an observation is grouped under, built the one way."""
     return f"{origin}-{destination}-{departure.isoformat()}-{cabin}"
+
+
+def result_to_row(result: Result) -> RunResultRow:
+    """One task's outcome, flattened onto the row that keeps it."""
+    return RunResultRow(
+        supplier=result.task.supplier,
+        market=result.task.market.key,
+        departure=result.task.departure,
+        outcome=result.outcome.value,
+        offers=result.offers,
+        attempts=result.attempts,
+        digest=result.digest,
+        reason=result.reason[:128],
+        fresh=result.fresh,
+        problems=result.problems,
+    )
+
+
+def row_to_result(row: RunResultRow, started: date) -> Result:
+    """Rebuild a result, working out again what was never stored.
+
+    Days out is derived from the run's own start rather than kept, because a
+    stored copy can disagree with the departure sitting next to it and there
+    is no way afterwards to tell which of the two is wrong.
+    """
+    origin, destination = row.market.split("-", 1)
+    return Result(
+        task=Task(
+            supplier=row.supplier,
+            market=Market(origin, destination),
+            departure=row.departure,
+            days_out=(row.departure - started).days,
+        ),
+        outcome=Outcome(row.outcome),
+        offers=row.offers,
+        digest=row.digest,
+        fresh=row.fresh,
+        attempts=row.attempts,
+        problems=row.problems,
+        reason=row.reason,
+    )
+
+
+def run_to_row(report: RunReport, finished: datetime | None = None) -> RunRow:
+    """A whole run, with its results hanging off it."""
+    row = RunRow(
+        started_at=report.started,
+        finished_at=finished,
+        tasks=len(report.results),
+        calls=report.calls,
+        offers=report.offers,
+        skipped_breaker=report.skipped_breaker,
+        skipped_budget=report.skipped_budget,
+    )
+    row.results = [result_to_row(r) for r in report.results]
+    return row
+
+
+def row_to_run(row: RunRow) -> RunReport:
+    """Rebuild a run report out of the database, results and all."""
+    started = row.started_at
+    report = RunReport(
+        started=started,
+        skipped_breaker=row.skipped_breaker,
+        skipped_budget=row.skipped_budget,
+    )
+    report.results = [row_to_result(r, started.date()) for r in row.results]
+    return report

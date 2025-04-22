@@ -29,6 +29,7 @@ from gussetline.persistence.repositories import (
     CarrierRepository,
     ObservationRepository,
     QuoteRepository,
+    RunRepository,
     TariffRepository,
     WatchRepository,
 )
@@ -86,6 +87,7 @@ class UnitOfWork:
         self.observations = ObservationRepository(session)
         self.watches = WatchRepository(session)
         self.quotes = QuoteRepository(session)
+        self.runs = RunRepository(session)
         self.committed = False
 
     def commit(self) -> None:

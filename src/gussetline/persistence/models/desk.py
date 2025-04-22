@@ -196,6 +196,13 @@ class RunResultRow(Base):
     digest: Mapped[str] = mapped_column(String(32), default="")
     reason: Mapped[str] = mapped_column(String(128), default="")
 
+    # Both of these are readings the reliability report cannot get anywhere
+    # else. A payload we already held says the supplier is serving a cache
+    # back at us, and offers inside a payload that would not parse say the
+    # feed has moved under our parser. Neither shows in a status code.
+    fresh: Mapped[bool] = mapped_column(Boolean, default=True)
+    problems: Mapped[int] = mapped_column(Integer, default=0)
+
     run: Mapped[RunRow] = relationship(back_populates="results")
 
     def __repr__(self) -> str:

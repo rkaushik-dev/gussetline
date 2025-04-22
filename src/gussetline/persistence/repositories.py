@@ -19,6 +19,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from gussetline.carriers import Carrier
+from gussetline.collect.run import RunReport
 from gussetline.errors import NotFoundError
 from gussetline.geography import Airport
 from gussetline.offers import Offer
@@ -31,6 +32,8 @@ from gussetline.persistence.mappers import (
     row_to_carrier,
     row_to_fare,
     row_to_offer,
+    row_to_run,
+    run_to_row,
 )
 from gussetline.persistence.models import (
     AirportRow,
@@ -39,6 +42,8 @@ from gussetline.persistence.models import (
     LoadRow,
     ObservationRow,
     QuoteRow,
+    RunResultRow,
+    RunRow,
     TicketRow,
     WatchRow,
 )
@@ -287,3 +292,71 @@ class QuoteRepository:
             )
             .order_by(QuoteRow.amount)
         ).first()
+
+
+class RunRepository:
+    """Collection runs, which are read far more often than they are written.
+
+    Every report that says anything about the collectors is built out of
+    these rows and out of nothing else, so a run is written whole or not at
+    all: a half saved run is a hole in the reliability figures and in the
+    coverage figures at once, and neither report can tell that is what it is
+    looking at.
+
+    Reading always pulls the results in one go. A reliability report over a
+    month touches thirty runs and a few thousand results, and letting those
+    load one relationship at a time turns one query into three thousand.
+    """
+
+    def __init__(self, session: Session) -> None:
+        self.session = session
+
+    def record(self, report: RunReport, finished: datetime | None = None) -> RunRow:
+        row = run_to_row(report, finished)
+        self.session.add(row)
+        self.session.flush()
+        return row
+
+    def get(self, identifier: int) -> RunReport:
+        row = self.session.get(RunRow, identifier)
+        if row is None:
+            raise NotFoundError("no such run", run=identifier)
+        return row_to_run(row)
+
+    def recent(self, limit: int = 30) -> list[RunReport]:
+        """The newest runs first, which is the order every report wants."""
+        rows = self.session.scalars(
+            select(RunRow)
+            .options(selectinload(RunRow.results))
+            .order_by(RunRow.started_at.desc())
+            .limit(limit)
+        ).all()
+        return [row_to_run(row) for row in rows]
+
+    def since(self, first: datetime) -> list[RunReport]:
+        """Every run from a moment onwards, oldest first."""
+        rows = self.session.scalars(
+            select(RunRow)
+            .options(selectinload(RunRow.results))
+            .where(RunRow.started_at >= first)
+            .order_by(RunRow.started_at)
+        ).all()
+        return [row_to_run(row) for row in rows]
+
+    def count(self) -> int:
+        return self.session.scalar(select(func.count()).select_from(RunRow)) or 0
+
+    def count_results(self) -> int:
+        return self.session.scalar(select(func.count()).select_from(RunResultRow)) or 0
+
+    def prune(self, before: datetime) -> int:
+        """Drop runs older than a date. Returns how many went.
+
+        Results go with them through the cascade rather than through a second
+        delete, because a result whose run has gone is unreadable: it has no
+        start date on it and every reading here is measured against one.
+        """
+        rows = self.session.scalars(select(RunRow).where(RunRow.started_at < before)).all()
+        for row in rows:
+            self.session.delete(row)
+        return len(rows)

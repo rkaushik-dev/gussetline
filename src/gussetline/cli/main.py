@@ -130,9 +130,11 @@ def _register() -> None:
     Desk and pass_desk from this module, and importing them at the top would
     be a cycle. The call is at the bottom, after both exist.
     """
+    from gussetline.cli.collect import collect
     from gussetline.cli.load import load
 
     cli.add_command(load)
+    cli.add_command(collect)
 
 
 def main() -> int:

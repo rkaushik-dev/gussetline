@@ -35,6 +35,7 @@ from gussetline.errors import (
     SupplierUnavailable,
     ValidationError,
 )
+from gussetline.geography import city_of
 
 
 class Capability(str, Enum):
@@ -93,6 +94,21 @@ def classify(exc: BaseException | None) -> Outcome:
     return Outcome.TRANSIENT
 
 
+def fold_market(pair: str) -> str:
+    """Put a market key in the terms everything else uses, which is cities.
+
+    A supplier publishes its coverage in airports and the schedule keys its
+    markets by city, so a feed that lists FRA to JFK never matches a task for
+    FRA to NYC and every one of its markets quietly falls through to the
+    gateway. That cost a month of gateway calls for questions the feed would
+    have answered for nothing.
+    """
+    parts = pair.strip().upper().split("-")
+    if len(parts) != 2:
+        return pair.strip().upper()
+    return f"{city_of(parts[0])}-{city_of(parts[1])}"
+
+
 @dataclass(frozen=True, slots=True)
 class Supplier:
     """One source, what it can do, and what it costs to ask."""
@@ -110,6 +126,7 @@ class Supplier:
         if not self.name.strip():
             raise ValidationError("a supplier has a name")
         object.__setattr__(self, "name", self.name.strip().lower())
+        object.__setattr__(self, "markets", frozenset(fold_market(m) for m in self.markets))
         if self.cost_per_call < 0:
             raise ValidationError("a call does not pay us", cost=str(self.cost_per_call))
 
@@ -124,7 +141,7 @@ class Supplier:
         """
         if not self.markets:
             return True
-        return market.upper() in self.markets
+        return fold_market(market) in self.markets
 
     @property
     def is_free(self) -> bool:

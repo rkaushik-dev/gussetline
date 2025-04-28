@@ -11,6 +11,7 @@ from gussetline.collect.registry import (
     Supplier,
     classify,
     default_registry,
+    fold_market,
 )
 from gussetline.errors import (
     BudgetExhausted,
@@ -155,3 +156,48 @@ def test_the_shipped_registry_holds_the_three_suppliers():
     assert registry.get("gds").cost_per_call == Decimal("0.04")
     assert registry.get("ndc").is_free
     assert not registry.get("calendar").can(Capability.SHOP)
+
+
+def test_a_supplier_market_list_is_folded_to_cities_when_it_is_taken_in():
+    # Suppliers publish coverage in airports and the schedule keys markets by
+    # city, so an unfolded list matches nothing and every market falls through
+    # to whichever supplier publishes no list at all.
+    made = Supplier(
+        name="feed",
+        host="offers.example",
+        capabilities=frozenset({Capability.SHOP}),
+        markets=frozenset({"FRA-JFK", "MUC-ORD"}),
+    )
+    assert made.markets == frozenset({"FRA-NYC", "MUC-CHI"})
+
+
+def test_a_supplier_covers_a_market_asked_for_in_either_form():
+    made = Supplier(
+        name="feed",
+        host="offers.example",
+        capabilities=frozenset({Capability.SHOP}),
+        markets=frozenset({"FRA-JFK"}),
+    )
+    assert made.covers("FRA-NYC")
+    assert made.covers("FRA-EWR")
+    assert made.covers("fra-jfk")
+    assert not made.covers("FRA-ORD")
+
+
+def test_a_market_string_that_is_not_a_pair_is_left_alone():
+    assert fold_market("nonsense") == "NONSENSE"
+    assert fold_market("FRA-JFK") == "FRA-NYC"
+
+
+def test_the_free_feed_wins_a_market_both_suppliers_cover():
+    registry = default_registry()
+    cheapest = registry.cheapest_for("FRA-NYC", Capability.SHOP)
+    assert cheapest is not None
+    assert cheapest.name == "ndc"
+
+
+def test_the_gateway_takes_a_market_the_feed_does_not_publish():
+    registry = default_registry()
+    cheapest = registry.cheapest_for("LON-DXB", Capability.SHOP)
+    assert cheapest is not None
+    assert cheapest.name == "gds"

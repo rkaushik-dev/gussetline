@@ -61,6 +61,13 @@ class Segment:
     equipment: str | None = None
     day_change: int = 0
     stops: int = 0
+    elapsed_minutes: int | None = None
+
+    # Whether the times on this sector came from a supplier or were made up
+    # because nobody sent any. Downstream has to be able to tell, since a
+    # made up time is fine for a stopover test and useless for a category 2
+    # day and time rule, and nothing else can work out which it is.
+    estimated: bool = False
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "marketing_carrier", normalise_code(self.marketing_carrier))
@@ -161,6 +168,38 @@ def infer_day_change(
         if landed - timedelta(minutes=destination_offset) > departure_utc:
             return candidate
     return 0
+
+
+class YearRoll:
+    """Carries the year forward across dates that only give a month.
+
+    Two feeds and one command line all send dates with no year on them, and
+    none of the three can be read one date at a time. The year comes from the
+    order: it rolls forward the moment the month goes backwards, and it never
+    rolls back, because a journey does not.
+    """
+
+    def __init__(self, start: int) -> None:
+        self.year = start
+        self._last_month = 0
+
+    @classmethod
+    def from_date(cls, on: date) -> YearRoll:
+        """Start from a day rather than a year.
+
+        The difference matters on the first date. Starting from a year alone
+        reads 04JAN as this January even when the entry is being priced in
+        December, which puts an outbound eleven months in the past.
+        """
+        made = cls(on.year)
+        made._last_month = on.month
+        return made
+
+    def resolve(self, month: int, day: int) -> date:
+        if self._last_month and month < self._last_month:
+            self.year += 1
+        self._last_month = month
+        return date(self.year, month, day)
 
 
 @dataclass(slots=True)

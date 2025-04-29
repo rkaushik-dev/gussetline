@@ -17,13 +17,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from dataclasses import field as dcfield
-from datetime import date, datetime
+from datetime import datetime
 from decimal import Decimal
 
 from gussetline.collect.fixedwidth import Layout, Record, RecordSpec, fields
 from gussetline.collect.harvest import Harvest
 from gussetline.errors import MalformedPayload, ValidationError
-from gussetline.flights import Cabin, Segment
+from gussetline.flights import Cabin, Segment, YearRoll
 from gussetline.itinerary import Itinerary
 from gussetline.money import Money
 from gussetline.offers import Baggage, Offer, PriceBreakdown
@@ -95,25 +95,6 @@ END = RecordSpec(
 )
 
 LAYOUT = Layout([HEADER, OFFER, SECTOR, COMPONENT, TAX, END])
-
-
-class YearRoll:
-    """Carries the year forward across records that only give a month.
-
-    Starts at the header's year and rolls forward whenever the month goes
-    backwards, which is the only signal the payload gives that a new year has
-    begun. It never rolls back, because a journey does not.
-    """
-
-    def __init__(self, start: int) -> None:
-        self.year = start
-        self._last_month = 0
-
-    def resolve(self, month: int, day: int) -> date:
-        if self._last_month and month < self._last_month:
-            self.year += 1
-        self._last_month = month
-        return date(self.year, month, day)
 
 
 def _sector(record: Record, roll: YearRoll) -> Segment:

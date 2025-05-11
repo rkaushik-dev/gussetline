@@ -32,6 +32,13 @@ day change that did not happen.
 
 A made up time is marked, so nothing downstream mistakes it for something a
 supplier said.
+
+Made up times also have to agree with each other. Two sectors on one date both
+put at midday means the second leaves an hour before the first lands, and the
+itinerary refuses itself. So a made up departure is pushed past the previous
+arrival by a nominal connection when the two share a date. That is not a claim
+about the real timetable. It is the least the entry has to say for the rest of
+the ladder to be able to read it at all.
 """
 
 from __future__ import annotations
@@ -52,6 +59,10 @@ SURFACE = "//"
 CRUISE_MILES_PER_HOUR = 500
 GROUND_MINUTES = 30
 NOMINAL_DEPARTURE_HOUR = 12
+
+# The least time a made up connection is given, so a same day connection
+# does not read as a sector that leaves before the one before it lands.
+NOMINAL_CONNECTION_MINUTES = 60
 
 MONTHS: dict[str, int] = {
     "JAN": 1,
@@ -160,8 +171,27 @@ def _flown(
     when, timed = _when(tokens[index + 2], roll)
     landing = _point(tokens[index + 3])
 
+    if not timed:
+        when = _after(when, elements)
     elements.append(_segment(carrier, number, booking, point, landing, when, timed))
     return index + 4, landing
+
+
+def _after(when: datetime, elements: list[Element]) -> datetime:
+    """Push a made up departure past the sector before it, on the same date.
+
+    Only for made up times, and only within a date. A real time is what the
+    supplier said and is never moved, and a sector on a later date has a whole
+    night in front of it.
+    """
+    flown = [e for e in elements if isinstance(e, Segment)]
+    if not flown:
+        return when
+    landed = flown[-1].arrival
+    if landed.date() != when.date():
+        return when
+    earliest = landed + timedelta(minutes=NOMINAL_CONNECTION_MINUTES)
+    return max(when, earliest)
 
 
 def _segment(

@@ -132,9 +132,11 @@ def _register() -> None:
     """
     from gussetline.cli.collect import collect
     from gussetline.cli.load import load
+    from gussetline.cli.price import price_it
 
     cli.add_command(load)
     cli.add_command(collect)
+    cli.add_command(price_it)
 
 
 def main() -> int:

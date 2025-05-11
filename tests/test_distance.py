@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import pytest
 
-from gussetline.distance import MileageTable, default_mileage_table, great_circle
-from gussetline.errors import MileageUnavailable
+from gussetline.distance import MileageTable, default_mileage_table, great_circle, point_of
+from gussetline.errors import MileageUnavailable, ValidationError
+from gussetline.geography import airports_in
 from gussetline.indicators import GlobalIndicator
 
 
@@ -121,3 +122,30 @@ def test_an_unlisted_pair_still_prices_off_the_shipped_table():
     reading = table.tpm("BGI", "NBO")
     assert reading.is_fallback
     assert reading.miles > 0
+
+
+def test_a_city_code_measures_from_one_of_its_airports():
+    # A metro code has no coordinates. Measuring from it raises an unknown
+    # airport, which the mileage check then reports as a bad itinerary
+    # instead of as a mileage nobody published.
+    assert point_of("NYC") in airports_in("NYC")
+    assert point_of("JFK") == "JFK"
+
+
+def test_a_code_that_is_neither_an_airport_nor_a_city_is_refused():
+    with pytest.raises(ValidationError):
+        point_of("ZZZ")
+
+
+def test_an_unpublished_city_pair_falls_back_instead_of_raising():
+    reading = MileageTable().tpm("MUC", "NYC")
+    assert reading.is_fallback
+    assert reading.miles > 3000
+
+
+def test_a_published_pair_is_not_a_fallback():
+    table = MileageTable()
+    table.add("MUC", "NYC", 4100)
+    reading = table.tpm("MUC", "NYC")
+    assert reading.published
+    assert reading.miles == 4100

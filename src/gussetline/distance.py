@@ -20,10 +20,28 @@ import math
 from dataclasses import dataclass
 
 from gussetline.errors import MileageUnavailable
-from gussetline.geography import airport, city_of
+from gussetline.geography import AIRPORTS, airport, airports_in, city_of
 from gussetline.indicators import GlobalIndicator
 
 EARTH_RADIUS_MILES = 3958.7613
+
+
+def point_of(code: str) -> str:
+    """An airport to measure from, given a code that may name a city.
+
+    A metro code has no coordinates of its own, so measuring NYC to MUC by
+    great circle fails with an unknown airport and the caller reads that as a
+    bad itinerary rather than as an unpublished mileage. The first airport in
+    the group stands in, which is within a few miles of any of them and is
+    only ever used where nothing is published anyway.
+    """
+    key = code.strip().upper()
+    if key in AIRPORTS:
+        return key
+    found = airports_in(key)
+    if not found:
+        raise MileageUnavailable("nothing to measure from", point=key)
+    return found[0]
 
 
 def great_circle(left: str, right: str) -> int:
@@ -122,7 +140,7 @@ class MileageTable:
         try:
             return Mileage(self.published(left, right, indicator), True, indicator)
         except MileageUnavailable:
-            return Mileage(great_circle(left, right), False, indicator)
+            return Mileage(great_circle(point_of(left), point_of(right)), False, indicator)
 
     def size(self) -> int:
         return len(self._any) + len(self._exact)

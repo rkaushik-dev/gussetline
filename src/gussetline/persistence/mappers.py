@@ -20,6 +20,7 @@ from gussetline.carriers import Alliance, Carrier
 from gussetline.collect.registry import Outcome
 from gussetline.collect.run import Result, RunReport
 from gussetline.collect.schedule import Market, Task
+from gussetline.combinability import Combinability
 from gussetline.flights import Cabin, Segment
 from gussetline.geography import Airport
 from gussetline.indicators import GlobalIndicator
@@ -29,6 +30,7 @@ from gussetline.offers import Baggage, Offer, PriceBreakdown
 from gussetline.persistence.models import (
     AirportRow,
     CarrierRow,
+    CombinabilityRow,
     FareRow,
     ObservationRow,
     RunResultRow,
@@ -318,3 +320,34 @@ def row_to_run(row: RunRow) -> RunReport:
     )
     report.results = [row_to_result(r, started.date()) for r in row.results]
     return report
+
+
+# The eight flags travel together and are named the same on both sides, so
+# both directions read off one list rather than two that can drift apart.
+COMBINABILITY_FLAGS = (
+    "round_trip",
+    "circle_trip",
+    "open_jaw",
+    "double_open_jaw",
+    "end_on_end",
+    "same_carrier_only",
+    "same_rule_only",
+    "side_trip",
+)
+
+
+def combinability_to_row(record: Combinability, load_id: int | None = None) -> CombinabilityRow:
+    return CombinabilityRow(
+        load_id=load_id,
+        carrier=record.carrier,
+        fare_basis=record.fare_basis,
+        **{name: getattr(record, name) for name in COMBINABILITY_FLAGS},
+    )
+
+
+def row_to_combinability(row: CombinabilityRow) -> Combinability:
+    return Combinability(
+        carrier=row.carrier,
+        fare_basis=row.fare_basis,
+        **{name: getattr(row, name) for name in COMBINABILITY_FLAGS},
+    )

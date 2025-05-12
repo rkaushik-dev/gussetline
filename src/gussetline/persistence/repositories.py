@@ -20,16 +20,19 @@ from sqlalchemy.orm import Session, selectinload
 
 from gussetline.carriers import Carrier
 from gussetline.collect.run import RunReport
+from gussetline.combinability import Combinability, CombinabilityStore
 from gussetline.errors import NotFoundError
 from gussetline.geography import Airport
 from gussetline.offers import Offer
 from gussetline.persistence.mappers import (
     airport_to_row,
     carrier_to_row,
+    combinability_to_row,
     fare_to_row,
     offer_to_row,
     row_to_airport,
     row_to_carrier,
+    row_to_combinability,
     row_to_fare,
     row_to_offer,
     row_to_run,
@@ -38,6 +41,7 @@ from gussetline.persistence.mappers import (
 from gussetline.persistence.models import (
     AirportRow,
     CarrierRow,
+    CombinabilityRow,
     FareRow,
     LoadRow,
     ObservationRow,
@@ -360,3 +364,91 @@ class RunRepository:
         for row in rows:
             self.session.delete(row)
         return len(rows)
+
+
+class CombinabilityRepository:
+    """Category 10, which is the one lookup the price ladder cannot skip.
+
+    A fare with no record here combines with nothing, so an empty table turns
+    every round trip into a refusal. That is the right default and it is also
+    the reason this is loaded eagerly for a whole carrier rather than one fare
+    basis at a time: a component that refuses is exactly the one somebody is
+    about to ask about, and answering with a second round of queries under
+    them is how a price screen takes four seconds.
+    """
+
+    def __init__(self, session: Session) -> None:
+        self.session = session
+
+    def save(self, record: Combinability, load_id: int | None = None) -> CombinabilityRow:
+        existing = self.session.scalars(
+            select(CombinabilityRow).where(
+                CombinabilityRow.carrier == record.carrier,
+                CombinabilityRow.fare_basis == record.fare_basis,
+            )
+        ).one_or_none()
+        if existing is None:
+            row = combinability_to_row(record, load_id)
+            self.session.add(row)
+            return row
+        for name in (
+            "round_trip",
+            "circle_trip",
+            "open_jaw",
+            "double_open_jaw",
+            "end_on_end",
+            "same_carrier_only",
+            "same_rule_only",
+            "side_trip",
+        ):
+            setattr(existing, name, getattr(record, name))
+        return existing
+
+    def save_all(self, records: list[Combinability], load_id: int | None = None) -> int:
+        for record in records:
+            self.save(record, load_id)
+        return len(records)
+
+    def get(self, carrier: str, fare_basis: str) -> Combinability | None:
+        row = self.session.scalars(
+            select(CombinabilityRow).where(
+                CombinabilityRow.carrier == carrier.upper(),
+                CombinabilityRow.fare_basis == fare_basis.upper(),
+            )
+        ).one_or_none()
+        return None if row is None else row_to_combinability(row)
+
+    def store_for(self, carriers: list[str]) -> CombinabilityStore:
+        """Everything filed for a set of carriers, as the store the engine reads."""
+        store = CombinabilityStore()
+        if not carriers:
+            return store
+        rows = self.session.scalars(
+            select(CombinabilityRow).where(
+                CombinabilityRow.carrier.in_([c.upper() for c in carriers])
+            )
+        ).all()
+        for row in rows:
+            store.add(row_to_combinability(row))
+        return store
+
+    def delete(self, carrier: str, fare_basis: str) -> bool:
+        """Drop a withdrawn record. Says whether it was there.
+
+        Deleted rather than blanked. A row with every flag off looks exactly
+        like a fare the carrier filed as uncombinable, and the two need
+        different answers when somebody asks why a round trip refused.
+        """
+        row = self.session.scalars(
+            select(CombinabilityRow).where(
+                CombinabilityRow.carrier == carrier.upper(),
+                CombinabilityRow.fare_basis == fare_basis.upper(),
+            )
+        ).one_or_none()
+        if row is None:
+            return False
+        self.session.delete(row)
+        return True
+
+    def count(self) -> int:
+        return self.session.scalar(select(func.count()).select_from(CombinabilityRow)) or 0

@@ -86,6 +86,19 @@ class CombinabilityStore:
     def get(self, carrier: str, fare_basis: str) -> Combinability | None:
         return self._records.get((normalise_code(carrier), fare_basis.strip().upper()))
 
+    def remove(self, carrier: str, fare_basis: str) -> bool:
+        """Drop a record the carrier has withdrawn. Says whether it was there."""
+        key = (normalise_code(carrier), fare_basis.strip().upper())
+        if key not in self._records:
+            return False
+        del self._records[key]
+        return True
+
+    def bases(self, carrier: str) -> list[str]:
+        """Every fare basis held for one carrier, for a dump or a check."""
+        code = normalise_code(carrier)
+        return sorted(basis for held, basis in self._records if held == code)
+
     def __len__(self) -> int:
         return len(self._records)
 

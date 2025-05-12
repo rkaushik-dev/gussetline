@@ -7,9 +7,12 @@ from click.testing import CliRunner
 
 from gussetline.cli.main import OPERATOR_CAN_FIX, cli, exit_code_for
 from gussetline.cli.price import _pairs
+from gussetline.collect.fixedwidth import write_record
+from gussetline.combinability import Combinability
 from gussetline.config import Settings
 from gussetline.errors import ValidationError
 from gussetline.indicators import GlobalIndicator
+from gussetline.load.combinability import COMBINABILITY
 from gussetline.money import Money
 from gussetline.persistence.unitofwork import Database
 from gussetline.spec import parse
@@ -244,3 +247,96 @@ def test_a_quiet_run_still_prints_the_refusals(runner, env):
     load(env, fare(destination="ORD"))
     reply = run(runner, "--quiet", "price", OUT, "--on", TODAY)
     assert "base fare" not in reply.output
+
+
+def combinability(url: str, basis="KLWAP7RT", carrier="LH") -> None:
+    database = Database(Settings(database_url=url))
+    with database.unit() as work:
+        work.combinability.save(
+            Combinability(
+                carrier=carrier,
+                fare_basis=basis,
+                round_trip=True,
+                circle_trip=True,
+                open_jaw=True,
+                end_on_end=True,
+            )
+        )
+        work.commit()
+
+
+def test_a_round_trip_with_category_10_filed_can_be_issued(runner, env):
+    load(env, fare(), fare(origin="JFK", destination="FRA"))
+    combinability(env)
+    reply = run(runner, "price", RETURN, "--on", TODAY)
+    assert reply.exit_code == 0
+    assert "cannot be issued" not in reply.output
+    assert "base fare 840 EUR" in reply.output
+
+
+def test_a_record_filed_for_another_carrier_does_not_help(runner, env):
+    load(env, fare(), fare(origin="JFK", destination="FRA"))
+    combinability(env, carrier="UA")
+    reply = run(runner, "price", RETURN, "--on", TODAY)
+    assert reply.exit_code == 1
+    assert "no combinability filed" in reply.output
+
+
+def test_a_record_filed_for_another_fare_basis_does_not_help(runner, env):
+    load(env, fare(), fare(origin="JFK", destination="FRA"))
+    combinability(env, basis="MLWAP7RT")
+    reply = run(runner, "price", RETURN, "--on", TODAY)
+    assert reply.exit_code == 1
+
+
+def test_the_load_group_now_takes_a_category_10_file(runner, env, tmp_path):
+    path = tmp_path / "cat10.dat"
+    path.write_text(
+        write_record(
+            COMBINABILITY,
+            {
+                "carrier": "LH",
+                "fare_basis": "KLWAP7RT",
+                "round_trip": "Y",
+                "circle_trip": "Y",
+                "open_jaw": None,
+                "double_open_jaw": None,
+                "end_on_end": "Y",
+                "side_trip": None,
+                "any_carrier": None,
+                "same_rule_only": None,
+                "action": None,
+            },
+        ),
+        encoding="ascii",
+    )
+    reply = run(runner, "load", "combinability", str(path))
+    assert reply.exit_code == 0
+    assert "kept 1 records" in reply.output
+
+
+def test_a_loaded_category_10_file_makes_the_round_trip_issuable(runner, env, tmp_path):
+    load(env, fare(), fare(origin="JFK", destination="FRA"))
+    path = tmp_path / "cat10.dat"
+    path.write_text(
+        write_record(
+            COMBINABILITY,
+            {
+                "carrier": "LH",
+                "fare_basis": "KLWAP7RT",
+                "round_trip": "Y",
+                "circle_trip": None,
+                "open_jaw": None,
+                "double_open_jaw": None,
+                "end_on_end": None,
+                "side_trip": None,
+                "any_carrier": None,
+                "same_rule_only": None,
+                "action": None,
+            },
+        ),
+        encoding="ascii",
+    )
+    run(runner, "load", "combinability", str(path))
+    reply = run(runner, "price", RETURN, "--on", TODAY)
+    assert reply.exit_code == 0

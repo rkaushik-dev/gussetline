@@ -86,18 +86,19 @@ def _tariffs(desk: Desk, itinerary: Itinerary, when: date, carrier: str | None) 
     the week the second carrier is loaded.
     """
     store = TariffStore()
-    wanted = [carrier.upper()] if carrier else list(itinerary.carriers)
+    wanted = list(dict.fromkeys([carrier.upper()] if carrier else list(itinerary.carriers)))
 
     with desk.database.unit() as work:
-        for code in dict.fromkeys(wanted):
+        for code in wanted:
             for origin, destination in _pairs(itinerary):
                 store.add_many(work.tariff.search(code, origin, destination, when))
+        joins = work.combinability.store_for(wanted)
 
     # The maximum permitted mileages ship with the package rather than coming
     # out of the database. A fare whose routing map is missing prices on
     # mileage instead, so an empty table does not refuse the fare, it makes
     # the check itself fail on a city pair it has never heard of.
-    return Tariffs(fares=store, miles=default_mileage_table())
+    return Tariffs(fares=store, miles=default_mileage_table(), combinability=joins)
 
 
 def _pairs(itinerary: Itinerary) -> list[tuple[str, str]]:

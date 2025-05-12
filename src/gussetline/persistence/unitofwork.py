@@ -27,6 +27,7 @@ from gussetline.persistence.base import Base
 from gussetline.persistence.repositories import (
     AirportRepository,
     CarrierRepository,
+    CombinabilityRepository,
     ObservationRepository,
     QuoteRepository,
     RunRepository,
@@ -88,6 +89,7 @@ class UnitOfWork:
         self.watches = WatchRepository(session)
         self.quotes = QuoteRepository(session)
         self.runs = RunRepository(session)
+        self.combinability = CombinabilityRepository(session)
         self.committed = False
 
     def commit(self) -> None:

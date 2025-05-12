@@ -31,6 +31,8 @@ from sqlalchemy import select
 
 from gussetline.cli.main import OPERATOR_CAN_FIX, Desk, pass_desk
 from gussetline.collect.archive import digest_of
+from gussetline.combinability import CombinabilityStore
+from gussetline.load import combinability as join_feed
 from gussetline.load import fares as fare_feed
 from gussetline.load import rules as rule_feed
 from gussetline.persistence.models import LoadRow
@@ -129,3 +131,35 @@ def _finish(problems: list, dry_run: bool = False) -> None:
     """A file with bad records in it is something the operator decides about."""
     if problems and not dry_run:
         raise SystemExit(OPERATOR_CAN_FIX)
+
+
+@load.command("combinability")
+@click.argument("path", type=click.Path(exists=True, dir_okay=False, path_type=Path))
+@click.option("--dry-run", is_flag=True, help="Read it and say what would happen.")
+@pass_desk
+def load_combinability(desk: Desk, path: Path, dry_run: bool) -> None:
+    """Read a category 10 file into the tariff."""
+    reading = join_feed.read(path.read_bytes())
+
+    desk.say(str(reading))
+    _problems(desk, reading.problems)
+
+    store = CombinabilityStore()
+    applied = join_feed.apply(store, reading)
+    desk.say(f"{'would be' if dry_run else 'applied'}: {applied}")
+    if applied.combine_with_nothing:
+        desk.warn(
+            f"{applied.combine_with_nothing} fares combine with nothing, "
+            "which refuses every round trip they are in"
+        )
+
+    if not dry_run:
+        with desk.database.unit() as work:
+            written = work.combinability.save_all(reading.records)
+            dropped = sum(
+                1 for carrier, basis in reading.deleted if work.combinability.delete(carrier, basis)
+            )
+            work.commit()
+        desk.say(f"kept {written} records, dropped {dropped}")
+
+    _finish(reading.problems, dry_run=dry_run)

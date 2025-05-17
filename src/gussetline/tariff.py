@@ -14,7 +14,7 @@ way costs, and doubling it is not optional, it is what the filing means.
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
@@ -282,3 +282,20 @@ class TariffStore:
             destination=city_of(destination),
             fare_basis=wanted,
         )
+
+
+def filing_pairs(points: Sequence[str]) -> list[tuple[str, str]]:
+    """Every city pair a fare could be filed for over a set of points.
+
+    Cities and not airports, because the tariff files FRA to NYC and an
+    itinerary says JFK. Asking for the airport finds nothing and the caller
+    reads that as a market with no fare published, which is the same answer a
+    genuinely uncovered market gives and looks nothing like a bug. Two
+    commands got that wrong separately, which is why it lives here.
+
+    Both directions, and every point against every other, because a fare
+    component can end anywhere the journey touches and the tariff files each
+    direction on its own.
+    """
+    cities = list(dict.fromkeys(city_of(point) for point in points))
+    return [(left, right) for left in cities for right in cities if left != right]

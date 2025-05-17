@@ -29,15 +29,14 @@ from datetime import date, datetime
 
 import click
 
-from gussetline.cli.main import Desk, pass_desk
+from gussetline.cli.desk import Desk, pass_desk
 from gussetline.distance import default_mileage_table
 from gussetline.engine import Priced, Tariffs, price
 from gussetline.errors import GussetlineError
 from gussetline.exchange import Converter, default_roe_table
-from gussetline.geography import city_of
 from gussetline.itinerary import Itinerary
 from gussetline.spec import parse, render
-from gussetline.tariff import TariffStore
+from gussetline.tariff import TariffStore, filing_pairs
 
 
 @click.command("price")
@@ -102,26 +101,8 @@ def _tariffs(desk: Desk, itinerary: Itinerary, when: date, carrier: str | None) 
 
 
 def _pairs(itinerary: Itinerary) -> list[tuple[str, str]]:
-    """Every city pair a fare could be filed for on this itinerary.
-
-    Cities and not airports, because the tariff files FRA to NYC and the
-    itinerary says JFK. Asking for the airport finds nothing and the entry
-    comes back as though no fare were published, which is the same answer a
-    genuinely uncovered market gives and looks nothing like a bug.
-
-    Both directions, and every point against every other, because a fare
-    component can end anywhere the itinerary touches and the tariff files
-    each direction separately.
-    """
-    points = [
-        city_of(point) for point in [itinerary.origin, *[e.destination for e in itinerary.elements]]
-    ]
-    pairs: list[tuple[str, str]] = []
-    for left in points:
-        for right in points:
-            if left != right:
-                pairs.append((left, right))
-    return list(dict.fromkeys(pairs))
+    """Every city pair a fare could be filed for on this itinerary."""
+    return filing_pairs([itinerary.origin, *[e.destination for e in itinerary.elements]])
 
 
 def _breaks(raw: str) -> tuple[int, ...] | None:

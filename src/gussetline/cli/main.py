@@ -1,77 +1,50 @@
-"""The desk command line, and the three exit codes it uses.
+"""The root command, which assembles the others and owns the exit code.
 
-Nought is success. One is something the operator can fix: a market with no
-fares filed, a ticket number that does not exist, a setting that is not a
-number. Two is something they cannot: a supplier is down, the database is
-unreachable, a payload did not parse.
-
-The split matters because these commands run under cron. A one means the run
-found nothing to do and the night shift can ignore it; a two means somebody
-should look. A command line that returns one code for both produces either a
-pager that goes off every night or one that never goes off.
+Nothing here does any work. It reads the settings once, opens one connection,
+hands both to whichever command was asked for, and turns whatever comes back
+out of that command into the number cron will read.
 
 Every command takes the same connection and settings, built once here and
 handed down, so a subcommand cannot quietly open a second database.
+
+Registration is a function rather than a run of imports at the top, and Desk
+lives next door rather than here, for the same reason: every command module
+needs Desk, and this file needs every command module. With both in one file,
+importing a command directly, which is exactly what a test does, imports this
+file, which imports the command again while it is still half built.
 """
 
 from __future__ import annotations
 
 import sys
-from dataclasses import dataclass
 
 import click
 
 from gussetline import __version__
-from gussetline.config import Settings, from_env
-from gussetline.errors import (
-    ConfigError,
-    GussetlineError,
-    NotFoundError,
-    SupplierError,
-    TariffError,
-    ValidationError,
+from gussetline.cli.desk import (
+    FIXABLE,
+    OK,
+    OPERATOR_CAN_FIX,
+    SOMEBODY_SHOULD_LOOK,
+    Desk,
+    exit_code_for,
+    pass_desk,
 )
+from gussetline.config import from_env
+from gussetline.errors import GussetlineError
 from gussetline.persistence.unitofwork import Database
 
-OK = 0
-OPERATOR_CAN_FIX = 1
-SOMEBODY_SHOULD_LOOK = 2
-
-# Which failures the operator can do something about tonight.
-FIXABLE: tuple[type[GussetlineError], ...] = (
-    NotFoundError,
-    ValidationError,
-    TariffError,
-    ConfigError,
-)
-
-
-def exit_code_for(exc: BaseException) -> int:
-    """Turn a failure into the code cron will read."""
-    if isinstance(exc, FIXABLE):
-        return OPERATOR_CAN_FIX
-    if isinstance(exc, SupplierError):
-        return SOMEBODY_SHOULD_LOOK
-    return SOMEBODY_SHOULD_LOOK
-
-
-@dataclass
-class Desk:
-    """What every command is handed. Built once, at the top."""
-
-    settings: Settings
-    database: Database
-    quiet: bool = False
-
-    def say(self, message: str) -> None:
-        if not self.quiet:
-            click.echo(message)
-
-    def warn(self, message: str) -> None:
-        click.echo(message, err=True)
-
-
-pass_desk = click.make_pass_decorator(Desk)
+__all__ = [
+    "FIXABLE",
+    "OK",
+    "OPERATOR_CAN_FIX",
+    "SOMEBODY_SHOULD_LOOK",
+    "Desk",
+    "cli",
+    "exit_code_for",
+    "main",
+    "pass_desk",
+]
 
 
 @click.group(context_settings={"help_option_names": ["-h", "--help"]})
@@ -118,29 +91,34 @@ def check(desk: Desk) -> None:
         airports = work.airports.count()
         observations = work.observations.count()
         fares = work.tariff.count_fares()
+        joins = work.combinability.count()
+        runs = work.runs.count()
     click.echo(f"airports      {airports}")
     click.echo(f"fares         {fares}")
+    click.echo(f"combinability {joins}")
     click.echo(f"observations  {observations}")
+    click.echo(f"runs          {runs}")
 
 
-def _register() -> None:
+def register() -> None:
     """Hang the command groups off the root.
 
-    Done here rather than at the top of the file because every group imports
-    Desk and pass_desk from this module, and importing them at the top would
-    be a cycle. The call is at the bottom, after both exist.
+    Written to be safe to call twice, because a module that imports a command
+    directly reaches this on the way through and then again from the root.
     """
+    from gussetline.cli.audit import audit_them
     from gussetline.cli.collect import collect
     from gussetline.cli.load import load
     from gussetline.cli.price import price_it
 
-    cli.add_command(load)
-    cli.add_command(collect)
-    cli.add_command(price_it)
+    for command in (load, collect, price_it, audit_them):
+        if command.name and command.name not in cli.commands:
+            cli.add_command(command)
 
 
 def main() -> int:
     """The entry point, which turns a failure into the right code."""
+    register()
     try:
         cli.main(standalone_mode=False)
     except click.ClickException as exc:
@@ -155,7 +133,7 @@ def main() -> int:
     return OK
 
 
-_register()
+register()
 
 
 if __name__ == "__main__":  # pragma: no cover

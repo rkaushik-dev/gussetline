@@ -226,6 +226,32 @@ class ObservationRepository:
             ).all()
         )
 
+    def offers_since(
+        self,
+        when: datetime,
+        source: str | None = None,
+        limit: int | None = None,
+    ) -> list[Offer]:
+        """Offers rather than rows, with their sectors and taxes already in.
+
+        The sibling above hands back rows, which is right for a count and
+        wrong for anything that reads them: an offer is only whole once its
+        sectors and its taxes are loaded, and doing that lazily turns an audit
+        over a day into several thousand queries. The audit reads through
+        here.
+        """
+        statement = (
+            select(ObservationRow)
+            .where(ObservationRow.last_seen >= when)
+            .options(selectinload(ObservationRow.sectors), selectinload(ObservationRow.taxes))
+            .order_by(ObservationRow.last_seen)
+        )
+        if source is not None:
+            statement = statement.where(ObservationRow.source == source.strip().lower())
+        if limit is not None:
+            statement = statement.limit(limit)
+        return [row_to_offer(row) for row in self.session.scalars(statement).all()]
+
     def count(self) -> int:
         return self.session.scalar(select(func.count()).select_from(ObservationRow)) or 0
 

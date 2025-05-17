@@ -25,7 +25,7 @@ from datetime import date, datetime
 
 import click
 
-from gussetline.cli.main import Desk, pass_desk
+from gussetline.cli.desk import Desk, pass_desk
 from gussetline.collect import calendar as calendar_feed
 from gussetline.collect import gds as gds_feed
 from gussetline.collect import ndc as ndc_feed

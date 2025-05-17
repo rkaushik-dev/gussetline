@@ -8,7 +8,7 @@ from gussetline.errors import NoFareFound, ValidationError
 from gussetline.flights import Cabin
 from gussetline.indicators import GlobalIndicator
 from gussetline.money import Money
-from gussetline.tariff import Fare, FareType, OwRt, TariffStore
+from gussetline.tariff import Fare, FareType, OwRt, TariffStore, filing_pairs
 
 
 def fare(**over) -> Fare:
@@ -189,3 +189,33 @@ def test_lookup_by_basis_raises_when_the_basis_is_not_filed(store):
 def test_private_and_published_fares_sit_in_the_same_store(store):
     store.add(fare(fare_basis="KLWCORP", fare_type=FareType.CORPORATE))
     assert len(store.search("LH", "FRA", "JFK")) == 5
+
+
+def test_the_filing_pairs_of_one_market_are_both_directions():
+    assert filing_pairs(["FRA", "JFK"]) == [("FRA", "NYC"), ("NYC", "FRA")]
+
+
+def test_the_filing_pairs_fold_airports_to_cities():
+    # The tariff files FRA to NYC and an itinerary says JFK. Asking for the
+    # airport finds nothing and reads exactly like an uncovered market.
+    assert ("FRA", "NYC") in filing_pairs(["FRA", "EWR"])
+
+
+def test_two_airports_in_one_city_are_one_point():
+    assert filing_pairs(["JFK", "EWR"]) == []
+
+
+def test_a_connection_adds_its_own_pairs():
+    pairs = filing_pairs(["FRA", "MUC", "JFK"])
+    assert ("FRA", "MUC") in pairs
+    assert ("MUC", "NYC") in pairs
+    assert ("FRA", "NYC") in pairs
+    assert len(pairs) == 6
+
+
+def test_a_point_never_pairs_with_itself():
+    assert all(left != right for left, right in filing_pairs(["FRA", "MUC", "FRA"]))
+
+
+def test_no_points_give_no_pairs():
+    assert filing_pairs([]) == []

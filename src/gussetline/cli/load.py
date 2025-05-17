@@ -29,7 +29,7 @@ from pathlib import Path
 import click
 from sqlalchemy import select
 
-from gussetline.cli.main import OPERATOR_CAN_FIX, Desk, pass_desk
+from gussetline.cli.desk import OPERATOR_CAN_FIX, Desk, pass_desk
 from gussetline.collect.archive import digest_of
 from gussetline.combinability import CombinabilityStore
 from gussetline.load import combinability as join_feed

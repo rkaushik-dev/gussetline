@@ -116,6 +116,12 @@ class ProvisionRow(Base, TimestampMixin):
     The values are a small set of named columns rather than a blob, because
     the reports ask questions like which fares want a Saturday night, and a
     blob answers that only by parsing every row.
+
+    Two categories do not fit six columns, and rather than widen the table for
+    every category to suit one of them, they spill into ``detail``. That is a
+    blob by another name and it is deliberately the exception: a field goes
+    there only when no report will ever filter on it, and every kind that uses
+    it has to survive the round trip test that runs over all of them.
     """
 
     __tablename__ = "provisions"
@@ -133,6 +139,7 @@ class ProvisionRow(Base, TimestampMixin):
     currency: Mapped[str] = mapped_column(String(3), default="")
     flag_one: Mapped[bool] = mapped_column(Boolean, default=False)
     flag_two: Mapped[bool] = mapped_column(Boolean, default=False)
+    detail: Mapped[str] = mapped_column(String(512), default="")
 
     rule: Mapped[RuleRow] = relationship(back_populates="provisions")
 

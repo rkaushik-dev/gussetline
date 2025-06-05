@@ -201,3 +201,59 @@ def test_a_rule_dry_run_says_would_be(runner, desk, tmp_path):
     path = rule_file(tmp_path)
     reply = runner.invoke(cli, ["--database", desk, "load", "rules", path, "--dry-run"])
     assert "would be: 1 rules loaded" in reply.output
+
+
+def rules_reach_the_database(url: str):
+    from gussetline.config import Settings
+    from gussetline.persistence.unitofwork import Database
+
+    with Database(Settings(database_url=url)).unit() as work:
+        return work.rules.count(), work.rules.categories_held()
+
+
+def test_a_rule_file_lands_in_the_database(runner, desk, tmp_path):
+    path = rule_file(tmp_path)
+    reply = runner.invoke(cli, ["--database", desk, "load", "rules", path])
+    assert reply.exit_code == 0
+    assert "kept 1 rules" in reply.output
+    count, held = rules_reach_the_database(desk)
+    assert count == 1
+    assert held == {5: 1}
+
+
+def test_a_refiled_rule_replaces_what_is_stored(runner, desk, tmp_path):
+    first = rule_file(tmp_path, name="one.dat")
+    runner.invoke(cli, ["--database", desk, "load", "rules", first])
+    second = rule_file(
+        tmp_path,
+        write_record(
+            RULE_HEADER, {"carrier": "LH", "number": "0100", "tariff": "001", "action": "A"}
+        ),
+        write_record(MINIMUM, {"days": 3, "weekday": None}),
+        name="two.dat",
+    )
+    runner.invoke(cli, ["--database", desk, "load", "rules", second])
+    count, held = rules_reach_the_database(desk)
+    assert count == 1
+    assert held == {6: 1}
+
+
+def test_a_deleted_rule_is_dropped_from_the_database(runner, desk, tmp_path):
+    runner.invoke(cli, ["--database", desk, "load", "rules", rule_file(tmp_path, name="a.dat")])
+    gone = rule_file(
+        tmp_path,
+        write_record(
+            RULE_HEADER, {"carrier": "LH", "number": "0100", "tariff": "001", "action": "D"}
+        ),
+        name="b.dat",
+    )
+    reply = runner.invoke(cli, ["--database", desk, "load", "rules", gone])
+    assert "dropped 1" in reply.output
+    assert rules_reach_the_database(desk)[0] == 0
+
+
+def test_a_dry_run_of_a_rule_file_writes_nothing(runner, desk, tmp_path):
+    path = rule_file(tmp_path)
+    reply = runner.invoke(cli, ["--database", desk, "load", "rules", path, "--dry-run"])
+    assert "kept" not in reply.output
+    assert rules_reach_the_database(desk)[0] == 0

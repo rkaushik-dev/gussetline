@@ -45,12 +45,20 @@ from gussetline.persistence.models import (
     FareRow,
     LoadRow,
     ObservationRow,
+    ProvisionRow,
     QuoteRow,
+    RuleRow,
     RunResultRow,
     RunRow,
     TicketRow,
     WatchRow,
 )
+from gussetline.persistence.provisions import (
+    provision_to_row,
+    row_to_provision,
+    storable,
+)
+from gussetline.rules.base import RuleSet, RuleStore
 from gussetline.tariff import Fare
 
 
@@ -478,3 +486,117 @@ class CombinabilityRepository:
 
     def count(self) -> int:
         return self.session.scalar(select(func.count()).select_from(CombinabilityRow)) or 0
+
+
+class RuleRepository:
+    """Rules and the provisions inside them, replaced whole or not at all.
+
+    A rule is refiled rather than amended: the carrier sends the categories it
+    now has, and the ones it no longer sends are gone. So saving one deletes
+    every provision under it first. Merging instead would leave a category 6
+    the carrier withdrew last month sitting under a rule that no longer has
+    one, and a minimum stay nobody filed is the hardest kind of wrong answer
+    to find, because the rule looks right in every other respect.
+
+    A provision with no codec is not stored and is counted. That is a real
+    limitation and it is reported rather than swallowed, because a rule stored
+    without its category 15 permits a sale the carrier restricted.
+    """
+
+    def __init__(self, session: Session) -> None:
+        self.session = session
+
+    def save(self, rule: RuleSet, load_id: int | None = None) -> tuple[RuleRow, int]:
+        """Write a rule whole. Returns the row and how many provisions were dropped."""
+        row = self._row_for(rule)
+        if row is None:
+            row = RuleRow(
+                carrier=rule.carrier,
+                number=rule.number,
+                tariff_number=rule.tariff,
+                load_id=load_id,
+            )
+            self.session.add(row)
+        else:
+            row.provisions.clear()
+            row.load_id = load_id
+
+        dropped = 0
+        for provision in rule.provisions:
+            if not storable(provision):
+                dropped += 1
+                continue
+            row.provisions.append(provision_to_row(provision))
+        self.session.flush()
+        return row, dropped
+
+    def save_all(self, rules: list[RuleSet], load_id: int | None = None) -> tuple[int, int]:
+        """Write a whole file. Returns how many rules and how many were dropped."""
+        dropped = 0
+        for rule in rules:
+            _, missed = self.save(rule, load_id)
+            dropped += missed
+        return len(rules), dropped
+
+    def get(self, carrier: str, number: str, tariff: str = "1") -> RuleSet | None:
+        row = self._row_for_key(carrier, number, tariff)
+        return None if row is None else self._rule_from(row)
+
+    def delete(self, carrier: str, number: str, tariff: str = "1") -> bool:
+        row = self._row_for_key(carrier, number, tariff)
+        if row is None:
+            return False
+        self.session.delete(row)
+        return True
+
+    def store_for(self, carriers: list[str]) -> RuleStore:
+        """Every rule filed for a set of carriers, as the store the engine reads.
+
+        The provisions come in the same query. A price that touches four rules
+        and loads each one's provisions separately turns one lookup into nine,
+        and the ladder does that for every fare component it considers.
+        """
+        store = RuleStore()
+        if not carriers:
+            return store
+        rows = self.session.scalars(
+            select(RuleRow)
+            .options(selectinload(RuleRow.provisions))
+            .where(RuleRow.carrier.in_([c.upper() for c in carriers]))
+        ).all()
+        for row in rows:
+            store.add(self._rule_from(row))
+        return store
+
+    def count(self) -> int:
+        return self.session.scalar(select(func.count()).select_from(RuleRow)) or 0
+
+    def categories_held(self) -> dict[int, int]:
+        """How many provisions of each category are stored, for a load report."""
+        rows = self.session.execute(
+            select(ProvisionRow.category, func.count()).group_by(ProvisionRow.category)
+        ).all()
+        return {int(category): int(count) for category, count in rows}
+
+    def _row_for(self, rule: RuleSet) -> RuleRow | None:
+        return self._row_for_key(rule.carrier, rule.number, rule.tariff)
+
+    def _row_for_key(self, carrier: str, number: str, tariff: str) -> RuleRow | None:
+        return self.session.scalars(
+            select(RuleRow)
+            .options(selectinload(RuleRow.provisions))
+            .where(
+                RuleRow.carrier == carrier.upper(),
+                RuleRow.number == number.strip(),
+                RuleRow.tariff_number == tariff.strip(),
+            )
+        ).one_or_none()
+
+    @staticmethod
+    def _rule_from(row: RuleRow) -> RuleSet:
+        return RuleSet(
+            carrier=row.carrier,
+            number=row.number,
+            tariff=row.tariff_number,
+            provisions=tuple(row_to_provision(p) for p in row.provisions),
+        )

@@ -94,7 +94,7 @@ def load_fares(desk: Desk, path: Path, dry_run: bool, again: bool) -> None:
 @click.option("--dry-run", is_flag=True, help="Read it and say what would happen.")
 @pass_desk
 def load_rules(desk: Desk, path: Path, dry_run: bool) -> None:
-    """Read a rule file, which lives in memory and not in the database."""
+    """Read a rule file into the tariff."""
     payload = path.read_bytes()
     reading = rule_feed.read(payload)
 
@@ -110,6 +110,22 @@ def load_rules(desk: Desk, path: Path, dry_run: bool) -> None:
     store = RuleStore()
     applied = rule_feed.apply(store, reading)
     desk.say(f"{'would be' if dry_run else 'applied'}: {applied}")
+
+    if not dry_run:
+        with desk.database.unit() as work:
+            written, dropped = work.rules.save_all(reading.rules)
+            gone = sum(
+                1
+                for carrier, number, tariff in reading.deleted
+                if work.rules.delete(carrier, number, tariff)
+            )
+            work.commit()
+        desk.say(f"kept {written} rules, dropped {gone}")
+        if dropped:
+            # A rule stored without one of its categories permits something
+            # the carrier restricted, so this is a warning and not a note.
+            desk.warn(f"{dropped} provisions have no codec and were not stored")
+
     _finish(reading.problems, dry_run=dry_run)
 
 

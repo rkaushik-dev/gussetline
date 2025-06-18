@@ -109,9 +109,10 @@ def register() -> None:
     from gussetline.cli.audit import audit_them
     from gussetline.cli.collect import collect
     from gussetline.cli.load import load
+    from gussetline.cli.night import night
     from gussetline.cli.price import price_it
 
-    for command in (load, collect, price_it, audit_them):
+    for command in (load, collect, price_it, audit_them, night):
         if command.name and command.name not in cli.commands:
             cli.add_command(command)
 

@@ -150,6 +150,23 @@ class TariffRepository:
         rows = self.session.scalars(statement.order_by(FareRow.amount)).all()
         return [row_to_fare(r) for r in rows]
 
+    def by_basis(self, carrier: str, fare_basis: str, on: date | None = None) -> Fare | None:
+        """One fare by its basis, whatever market it is filed in.
+
+        A ticket carries fare bases and never rule numbers, so getting from a
+        ticket to its rule has to come through here. The market is not part of
+        the question: a fare basis is a carrier's own name for a fare and the
+        same one is not filed twice with different rules.
+        """
+        statement = select(FareRow).where(
+            FareRow.carrier == carrier.upper(),
+            FareRow.fare_basis == fare_basis.strip().upper(),
+        )
+        if on is not None:
+            statement = statement.where(FareRow.effective <= on, FareRow.discontinue >= on)
+        row = self.session.scalars(statement.order_by(FareRow.effective.desc())).first()
+        return None if row is None else row_to_fare(row)
+
     def loads_for(self, carrier: str) -> list[LoadRow]:
         return list(
             self.session.scalars(

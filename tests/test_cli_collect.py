@@ -181,7 +181,7 @@ def test_a_replay_keeps_nothing_and_says_why(runner, env, url, home):
         context={"market": "FRA-NYC", "departure": AUGUST.isoformat()},
     )
     reply = runner.invoke(cli, ["collect", "replay", "--on", TODAY])
-    assert "not kept, because nothing was asked of anybody" in reply.output
+    assert "no run kept, because nothing was asked of anybody" in reply.output
     database = Database(Settings(database_url=url))
     with database.unit() as work:
         assert work.runs.count() == 0

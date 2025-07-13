@@ -151,7 +151,7 @@ def test_a_series_reads_back_cheapest_first(client, database):
     with database.unit() as work:
         work.observations.save_all([an_offer("840.00"), an_offer("790.00")])
         work.commit()
-    reply = client.get("/observations/series/FRA-JFK-2025-08-04-Y")
+    reply = client.get("/observations/series/FRA-NYC-2025-08-04-Y")
     assert reply.status_code == 200
     body = reply.json()
     assert [o["total"]["amount"] for o in body["offers"]] == ["790.00", "840.00"]
@@ -162,7 +162,7 @@ def test_an_amount_crosses_the_wire_as_a_string(client, database):
     with database.unit() as work:
         work.observations.save(an_offer("840.00"))
         work.commit()
-    body = client.get("/observations/series/FRA-JFK-2025-08-04-Y").json()
+    body = client.get("/observations/series/FRA-NYC-2025-08-04-Y").json()
     assert body["offers"][0]["base"]["amount"] == "840.00"
     assert isinstance(body["offers"][0]["base"]["amount"], str)
 
@@ -176,7 +176,9 @@ def test_a_market_can_be_addressed_the_way_a_person_says_it(client, database):
         params={"origin": "FRA", "destination": "JFK", "departure": "2025-08-04"},
     )
     assert reply.status_code == 200
-    assert reply.json()["series_key"] == "FRA-JFK-2025-08-04-Y"
+    # An agent asks for JFK and gets the market, because that is what a
+    # series is keyed on and what the tariff prices.
+    assert reply.json()["series_key"] == "FRA-NYC-2025-08-04-Y"
 
 
 def test_a_market_query_with_a_bad_code_is_refused_before_it_reaches_storage(client):

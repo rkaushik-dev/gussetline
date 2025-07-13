@@ -157,7 +157,9 @@ def test_the_fingerprint_moves_when_the_fare_basis_moves():
 
 
 def test_the_series_key_groups_a_market_and_a_date():
-    assert offer().series_key() == ("FRA", "JFK", "2025-03-04", "Y")
+    # Cities, because a watch is on a market. A series keyed on Newark never
+    # meets the watch keyed on New York and nothing raises to say so.
+    assert offer().series_key() == ("FRA", "NYC", "2025-03-04", "Y")
 
 
 def test_two_offers_compare_and_subtract_in_one_currency():

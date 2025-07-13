@@ -195,7 +195,10 @@ def _change_fee(work: UnitOfWork, ticket: TicketRow, currency: str) -> Money | N
         fare = work.tariff.by_basis(ticket.validating_carrier, coupon.fare_basis)
         if fare is None:
             continue
-        rule = work.rules.get(ticket.validating_carrier, fare.rule_number)
+        # The tariff number comes off the fare. Defaulting it finds nothing
+        # for a carrier that files in tariff 3, and the threshold then falls
+        # back to the settings figure without saying it did.
+        rule = work.rules.get(ticket.validating_carrier, fare.rule_number, fare.tariff_number)
         if rule is None:
             continue
         for provision in rule.for_category(Category.PENALTIES):

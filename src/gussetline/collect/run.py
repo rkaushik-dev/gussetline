@@ -14,6 +14,12 @@ else, so a run that silently drops a task takes a hole in both with it.
 The fetch is passed in. That is what lets a whole day of collection run in a
 test in a second, and it is also what lets the desk replay a day out of the
 archive against a fixed parser without touching a supplier.
+
+What happens to the offers is passed in too. This used to count them and drop
+them, which made every part of the collector testable and the whole of it
+useless: a run that parses nine hundred offers and stores none of them leaves
+the audit and the night with nothing to read. The sink is optional because a
+plan or a dry run genuinely wants the counting and not the writing.
 """
 
 from __future__ import annotations
@@ -25,7 +31,7 @@ from decimal import Decimal
 
 from gussetline.collect.archive import Archive
 from gussetline.collect.breaker import BreakerBoard
-from gussetline.collect.harvest import Adapter
+from gussetline.collect.harvest import Adapter, Harvest
 from gussetline.collect.http import Response
 from gussetline.collect.limits import Limiter
 from gussetline.collect.registry import Outcome, Registry, Supplier, classify
@@ -34,6 +40,10 @@ from gussetline.errors import GussetlineError
 
 Fetch = Callable[[Supplier, Task], Response]
 Parse = Adapter
+
+# What to do with the offers a parse produced. Called once per answered task,
+# inside the run, so a failure writing them fails the task rather than the run.
+Sink = Callable[[Task, Harvest], None]
 
 
 @dataclass(frozen=True, slots=True)
@@ -134,6 +144,7 @@ class Collector:
         fetch: Fetch,
         parsers: dict[str, Parse],
         schedule: Schedule | None = None,
+        sink: Sink | None = None,
     ) -> RunReport:
         """Work through a plan, recording what every task did."""
         report = RunReport(started=self._now())
@@ -152,7 +163,7 @@ class Collector:
                 report.results.append(Result(task, Outcome.BUDGET, reason=budget.last_reason))
                 continue
 
-            report.results.append(self._one(supplier, task, today, fetch, parsers, schedule))
+            report.results.append(self._one(supplier, task, today, fetch, parsers, schedule, sink))
 
         return report
 
@@ -164,6 +175,7 @@ class Collector:
         fetch: Fetch,
         parsers: dict[str, Parse],
         schedule: Schedule | None,
+        sink: Sink | None = None,
     ) -> Result:
         seen = self._now()
         try:
@@ -222,6 +234,8 @@ class Collector:
             series = schedule.get(task.market, task.departure)
             if series is not None:
                 series.record(today, harvest.cheapest_amount())
+        if sink is not None:
+            sink(task, harvest)
 
         return Result(
             task,

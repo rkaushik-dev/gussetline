@@ -116,15 +116,26 @@ def _watch_from(work: UnitOfWork, row: WatchRow) -> Watch:
 
     Oldest first because the hysteresis reads the tail of the list, and a
     history in the other order would report the dearest of the oldest few.
+
+    A stored observation is a price and not a poll. The table is keyed on
+    content, so a market that sat at the same number for three mornings is one
+    row with a sighting count of three, and reading one reading off it tells
+    the hysteresis that the price has been seen once. That is the difference
+    between a drop that has held for three days and one seen this morning, so
+    each row is expanded by the number of times it was actually seen.
     """
-    readings = work.session.scalars(
+    rows = work.session.scalars(
         select(ObservationRow)
         .where(ObservationRow.series_key == row.series_key)
         .order_by(ObservationRow.last_seen.desc())
         .limit(READINGS)
     ).all()
-    history: list[Observation] = [observation_row_to_reading(r) for r in reversed(readings)]
-    return row_to_watch(row, history)
+
+    history: list[Observation] = []
+    for stored in reversed(rows):
+        reading = observation_row_to_reading(stored)
+        history.extend([reading] * max(stored.sightings, 1))
+    return row_to_watch(row, history[-READINGS:])
 
 
 def _open_book(work: UnitOfWork) -> list[Recommendation]:
@@ -147,7 +158,7 @@ class Rules:
     thousand from being priced.
     """
 
-    def __init__(self, store: RuleStore, numbers: dict[tuple[str, str], str]) -> None:
+    def __init__(self, store: RuleStore, numbers: dict[tuple[str, str], tuple[str, str]]) -> None:
         self.store = store
         self.numbers = numbers
         self.missing: list[str] = []
@@ -168,12 +179,20 @@ class Rules:
         return change, penalties, context
 
     def rule_for(self, watch: Watch) -> RuleSet | None:
+        """The rule this ticket's fare points at, in that fare's own tariff.
+
+        The tariff number comes off the fare and is not defaulted. A carrier
+        files rule 100 in tariff 1 and a different rule 100 in tariff 3, and
+        looking the first one up under the default finds nothing, which reads
+        as a fare with no rule and retires the watch.
+        """
         carrier = watch.ticket.validating_carrier
         for basis in watch.ticket.fare_bases():
-            number = self.numbers.get((carrier, basis))
-            if number is None:
+            filed = self.numbers.get((carrier, basis))
+            if filed is None:
                 continue
-            found = self.store.find(carrier, number)
+            number, tariff = filed
+            found = self.store.find(carrier, number, tariff)
             if found is not None:
                 return found
         return None
@@ -182,7 +201,7 @@ class Rules:
 def _rules_for(work: UnitOfWork, watches: list[Watch], when: date) -> Rules:
     """Build the fare basis to rule number lookup once for the whole run."""
     carriers = list(dict.fromkeys(w.ticket.validating_carrier for w in watches))
-    numbers: dict[tuple[str, str], str] = {}
+    numbers: dict[tuple[str, str], tuple[str, str]] = {}
     for watch in watches:
         carrier = watch.ticket.validating_carrier
         for basis in watch.ticket.fare_bases():
@@ -190,7 +209,7 @@ def _rules_for(work: UnitOfWork, watches: list[Watch], when: date) -> Rules:
                 continue
             fare = work.tariff.by_basis(carrier, basis, when)
             if fare is not None:
-                numbers[(carrier, basis)] = fare.rule_number
+                numbers[(carrier, basis)] = (fare.rule_number, fare.tariff_number)
     return Rules(work.rules.store_for(carriers), numbers)
 
 

@@ -22,7 +22,7 @@ from gussetline.collect.run import Result, RunReport
 from gussetline.collect.schedule import Market, Task
 from gussetline.combinability import Combinability
 from gussetline.flights import Cabin, Segment
-from gussetline.geography import Airport
+from gussetline.geography import Airport, city_of
 from gussetline.indicators import GlobalIndicator
 from gussetline.itinerary import Itinerary
 from gussetline.money import Money
@@ -250,8 +250,13 @@ def row_to_offer(row: ObservationRow) -> Offer:
 
 
 def series_key_of(origin: str, destination: str, departure: date, cabin: str) -> str:
-    """The key an observation is grouped under, built the one way."""
-    return f"{origin}-{destination}-{departure.isoformat()}-{cabin}"
+    """The key an observation is grouped under, built the one way.
+
+    Folded to cities here as well as on the offer, because this is reachable
+    from a caller that has airport codes in hand and a key built two ways is
+    a series that silently splits in half.
+    """
+    return f"{city_of(origin)}-{city_of(destination)}-{departure.isoformat()}-{cabin}"
 
 
 def result_to_row(result: Result) -> RunResultRow:

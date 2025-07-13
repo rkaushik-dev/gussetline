@@ -12,11 +12,18 @@ database, because every reading anybody has about the collectors is built out
 of those rows and out of nothing else.
 
 Replaying does the same thing against the archive instead of the suppliers,
-and it deliberately does not save. A replay is not a run: nothing was asked of
-anybody, and a reliability report that counted replays would say a supplier
+and it writes the offers without writing the run. Those two are different
+things and the distinction is the whole reason replay exists.
+
+An offer is a reading, and reparsing a stored payload with a fixed parser
+produces a better reading of the same moment, which is worth keeping. The
+observation table is keyed on content, so writing it again is a stamp move
+rather than a second row.
+
+A run is a record that somebody was asked something. Nothing was asked during
+a replay, and a reliability report that counted them would say a supplier
 answered on a day it was never called. That is the sort of number that gets
-believed for a month. So the replay prints its report and throws it away, and
-the flag to save one does not exist.
+believed for a month, so the flag to save one does not exist.
 """
 
 from __future__ import annotations
@@ -29,11 +36,12 @@ from gussetline.cli.desk import Desk, pass_desk
 from gussetline.collect import calendar as calendar_feed
 from gussetline.collect import gds as gds_feed
 from gussetline.collect import ndc as ndc_feed
-from gussetline.collect.harvest import Adapter
+from gussetline.collect.harvest import Adapter, Harvest
 from gussetline.collect.registry import Capability
 from gussetline.collect.rig import Rig, build, live_fetch, replay_fetch
 from gussetline.collect.run import RunReport
 from gussetline.collect.schedule import Market, RunPlan, Schedule, Series, Task
+from gussetline.persistence.unitofwork import UnitOfWork
 
 PARSERS: dict[str, Adapter] = {
     "gds": gds_feed.parse,
@@ -84,13 +92,18 @@ def run_it(desk: Desk, today: datetime | None, supplier: str | None, budget: int
         _show(desk, plan)
         return
 
-    report = rig.collector().run(plan.tasks, when, live_fetch(rig), rig.parsers, schedule)
-    _report(desk, report, rig)
-
     with desk.database.unit() as work:
+        kept = _keeper(work)
+        report = rig.collector().run(
+            plan.tasks, when, live_fetch(rig), rig.parsers, schedule, kept.sink
+        )
         row = work.runs.record(report, finished=rig.now())
         work.commit()
-    desk.say(f"kept as run {row.id}")
+        identifier = row.id
+
+    _report(desk, report, rig)
+    desk.say(f"kept {kept.written} offers, {kept.moved} already seen")
+    desk.say(f"kept as run {identifier}")
 
 
 @collect.command("replay")
@@ -104,9 +117,16 @@ def replay_it(desk: Desk, today: datetime | None, supplier: str | None) -> None:
     schedule = _schedule_from(desk, when)
     plan = _plan(rig, schedule, when, supplier, None, everything=True)
 
-    report = rig.collector().run(plan.tasks, when, replay_fetch(rig, supplier), rig.parsers)
+    with desk.database.unit() as work:
+        kept = _keeper(work)
+        report = rig.collector().run(
+            plan.tasks, when, replay_fetch(rig, supplier), rig.parsers, None, kept.sink
+        )
+        work.commit()
+
     _report(desk, report, rig)
-    desk.say("not kept, because nothing was asked of anybody")
+    desk.say(f"kept {kept.written} offers, {kept.moved} already seen")
+    desk.say("no run kept, because nothing was asked of anybody")
 
 
 def _schedule_from(desk: Desk, today: date) -> Schedule:
@@ -187,3 +207,29 @@ def _report(desk: Desk, report: RunReport, rig: Rig) -> None:
     for failure in report.failures()[:SHOWN_TASKS]:
         desk.warn(f"  {failure}")
     desk.say(f"cost {report.cost(rig.registry)}")
+
+
+class _Keeper:
+    """Writes the offers a run parsed, and counts what it did.
+
+    One instance per run, so the counts belong to that run and not to the
+    process. The sink is a bound method rather than a closure because the
+    collector holds it across every task and a closure over a mutable count
+    reads worse than an object that owns one.
+    """
+
+    def __init__(self, work: UnitOfWork) -> None:
+        self.work = work
+        self.written = 0
+        self.moved = 0
+
+    def sink(self, task: Task, harvest: Harvest) -> None:
+        if not harvest.offers:
+            return
+        added, seen = self.work.observations.save_all(list(harvest.offers))
+        self.written += added
+        self.moved += seen
+
+
+def _keeper(work: UnitOfWork) -> _Keeper:
+    return _Keeper(work)

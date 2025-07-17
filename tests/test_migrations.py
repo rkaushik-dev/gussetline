@@ -98,3 +98,68 @@ def test_the_foreign_keys_are_created_with_their_names(migrated):
     keys = inspect(migrated).get_foreign_keys("coupons")
     assert keys
     assert keys[0]["referred_table"] == "tickets"
+
+
+def test_every_revision_has_a_parent_except_the_first():
+    """A branch in the history is a merge nobody will notice until deploy."""
+    from alembic.script import ScriptDirectory
+
+    scripts = ScriptDirectory(str(ROOT / "migrations"))
+    heads = scripts.get_heads()
+    assert len(heads) == 1, f"the history has branched: {heads}"
+
+
+def test_the_revisions_run_in_the_order_they_are_numbered():
+    from alembic.script import ScriptDirectory
+
+    scripts = ScriptDirectory(str(ROOT / "migrations"))
+    walked = [revision.revision for revision in scripts.walk_revisions()]
+    assert walked == sorted(walked, reverse=True)
+
+
+def test_every_revision_says_how_to_go_back():
+    """A downgrade that is a bare pass is a deploy nobody can undo.
+
+    Autogenerate writes both directions and it is the down one that gets
+    emptied out, usually while somebody is getting a migration to apply.
+    The test is deliberately crude: it reads the source and looks for a
+    downgrade that does nothing, because there is no way to ask alembic
+    whether a function it can call is going to do anything.
+    """
+    from alembic.script import ScriptDirectory
+
+    scripts = ScriptDirectory(str(ROOT / "migrations"))
+    empty = []
+    for revision in scripts.walk_revisions():
+        source = Path(revision.path).read_text(encoding="utf-8")
+        body = source.split("def downgrade()", 1)[-1]
+        lines = [
+            line.strip()
+            for line in body.splitlines()[1:]
+            if line.strip() and not line.strip().startswith(("#", '"""'))
+        ]
+        if lines in ([], ["pass"]):
+            empty.append(revision.revision)
+    assert empty == [], f"these cannot be undone: {empty}"
+
+
+def test_the_chain_reaches_base_from_the_head_without_a_gap():
+    """One line back to the beginning. A missing parent is a silent skip."""
+    from alembic.script import ScriptDirectory
+
+    scripts = ScriptDirectory(str(ROOT / "migrations"))
+    walked = list(scripts.walk_revisions())
+    parents = [revision.down_revision for revision in walked]
+    assert parents[-1] is None
+    assert all(parent is not None for parent in parents[:-1])
+
+    known = {revision.revision for revision in walked}
+    assert all(parent in known for parent in parents[:-1])
+
+
+def test_no_two_revisions_share_an_identifier():
+    from alembic.script import ScriptDirectory
+
+    scripts = ScriptDirectory(str(ROOT / "migrations"))
+    seen = [revision.revision for revision in scripts.walk_revisions()]
+    assert len(seen) == len(set(seen))

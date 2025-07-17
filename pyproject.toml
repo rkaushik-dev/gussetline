@@ -26,6 +26,11 @@ gussetline = "gussetline.cli.main:main"
 [project.optional-dependencies]
 dev = [
   "pytest==8.3.4",
+  "pytest-cov==6.0.0",
+  # The suite spends nearly all its time building sqlite schemas, and every
+  # test file gets its own database, so it splits across cores almost
+  # perfectly. Four minutes to fifty seconds on a six core machine.
+  "pytest-xdist==3.6.1",
   "ruff==0.9.6",
   "mypy==1.15.0",
 ]
@@ -36,11 +41,43 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
-addopts = "-q"
+# Split by file rather than by test. Nothing here shares state between files,
+# and the per-file split keeps a failure reproducible with one path on the
+# command line, which loadscope does not promise once it starts balancing.
+addopts = "-q -n auto --dist loadfile"
 filterwarnings = [
   # Starlette's test client still reaches for an anyio alias that anyio has
   # deprecated. Not ours to fix and not worth reading on every run.
   "ignore:The anyio.abc.BlockingPortal alias is deprecated:DeprecationWarning",
+]
+
+[tool.coverage.run]
+# Named rather than inferred. Coverage guesses from the first file it imports,
+# and under xdist that is whichever worker started first, which is how a run
+# ends up measuring the tests instead of the package.
+source = ["gussetline"]
+parallel = true
+omit = [
+  # A migration runs once against a real database and its downgrade runs
+  # never. Counting them drags the figure around every time one is added and
+  # says nothing about whether the desk works.
+  "*/migrations/*",
+]
+
+[tool.coverage.report]
+# Two decimal places, because the gate is at 95 and a run that reports 95%
+# when it is at 94.6 has rounded its way past the thing it is there to catch.
+precision = 2
+skip_covered = true
+exclude_lines = [
+  "pragma: no cover",
+  # Imports that only exist for the type checker never run.
+  "if TYPE_CHECKING:",
+  # A module run directly. The CLI entry point is covered through the runner.
+  'if __name__ == "__main__":',
+  # An abstract method with no body is a declaration, not a branch.
+  "raise NotImplementedError",
+  "@overload",
 ]
 
 [tool.ruff]

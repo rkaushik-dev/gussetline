@@ -18,6 +18,9 @@ jobs:
   check:
     name: check on ${{ matrix.python }}
     runs-on: ubuntu-latest
+    # The whole suite runs in about a minute. Anything past ten is a hang, and
+    # a hung job holds a runner for six hours by default.
+    timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
@@ -45,12 +48,40 @@ jobs:
       - name: types
         run: mypy src
 
+      # The ten slowest tests, printed every run. A suite gets slow one
+      # test at a time and nobody notices until it is four minutes again.
       - name: tests
-        run: pytest -q
+        run: pytest -q --durations=10
+
+  coverage:
+    name: the suite covers what it claims to
+    runs-on: ubuntu-latest
+    # Single worker, so it is the slow one. Still nowhere near this.
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: install
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      # Run on one worker. Coverage under xdist has to combine the workers'
+      # data files and a lost one shows up as a real drop, which is a flaky
+      # gate rather than a slow one. The check job already runs it in parallel.
+      - name: tests with coverage
+        run: pytest -n 0 --cov=gussetline --cov-report=term-missing --cov-fail-under=95
 
   migrations:
     name: the migrations build the schema the models describe
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
 
@@ -69,7 +100,7 @@ jobs:
       # Running it on its own means a drift is a named failure rather than one
       # red cross among a thousand.
       - name: schema
-        run: pytest -q tests/test_migrations.py
+        run: pytest -q -n 0 tests/test_migrations.py
 
       - name: upgrade and downgrade a fresh database
         env:

@@ -18,6 +18,13 @@ before the single conversion into the selling currency.
 Put the band on at selection time instead and every component the minimum
 checks touch is surcharged on the wrong base. It is a small number and it is
 wrong in the supplier's favour, which is why nobody notices.
+
+Side trips come out before any of that happens. An excursion off the middle of
+a journey is priced as its own component and its points are not on the path of
+the component it hangs off, so the journey has to be split at its edges before
+the shape is read at all. Reading the shape first sees Frankfurt twice and
+calls a one way with an excursion a circle trip, which then breaks the fare
+where nothing turns round.
 """
 
 from __future__ import annotations
@@ -54,6 +61,9 @@ from gussetline.rules.base import Context as RuleContext
 from gussetline.rules.base import RuleStore, evaluate, refusals
 from gussetline.rules.breaks import Stopovers
 from gussetline.selection import apply_band, apply_fare, select
+from gussetline.sidetrip import SideTrip
+from gussetline.sidetrip import find as find_side_trips
+from gussetline.sidetrip import without as strip_side_trips
 from gussetline.surcharges import SurchargeTable, apply_all, assess_component
 from gussetline.tariff import TariffStore
 from gussetline.trace import Stage, Trace
@@ -126,8 +136,9 @@ def price(
     split it is given so that the search can compare two of them.
     """
     trail = trace if trace is not None else Trace(f"{itinerary.origin}{itinerary.destination}")
-    kind = itinerary.journey_type()
-    points = breaks if breaks is not None else _default_breaks(itinerary, kind)
+    excursions = find_side_trips(itinerary)
+    kind = _shape_of(itinerary, excursions, trail)
+    points = breaks if breaks is not None else _default_breaks(itinerary, kind, excursions)
     components = split_at(itinerary.elements, points)
     stopovers = itinerary.stopovers()
     connections = itinerary.connections()
@@ -258,14 +269,82 @@ def _charge_stopovers(
     return charged
 
 
-def _default_breaks(itinerary: Itinerary, kind: JourneyType) -> tuple[int, ...]:
-    """Break the fare where the journey turns round, which is the usual place."""
-    if kind is JourneyType.ONE_WAY:
-        return ()
-    turn = itinerary.turnaround_index()
-    if turn <= 0 or turn >= len(itinerary.elements):
-        return ()
-    return (turn - 1,)
+def _shape_of(itinerary: Itinerary, excursions: tuple[SideTrip, ...], trail: Trace) -> JourneyType:
+    """What kind of journey this is, once the excursions are set aside.
+
+    Frankfurt, Vienna, Frankfurt, New York touches Frankfurt twice and reads
+    as a circle trip while the excursion is still in it. Take the excursion
+    out and it is the one way it always was.
+    """
+    if not excursions:
+        return itinerary.journey_type()
+    kind = strip_side_trips(itinerary, excursions).journey_type()
+    trail.note(
+        Stage.SHAPE,
+        f"{len(excursions)} side trips set aside, leaving a {kind.value}",
+        excursions=", ".join(str(trip) for trip in excursions),
+    )
+    return kind
+
+
+def _default_breaks(
+    itinerary: Itinerary,
+    kind: JourneyType,
+    excursions: tuple[SideTrip, ...] = (),
+) -> tuple[int, ...]:
+    """Break the fare where the journey turns round, and at every excursion.
+
+    An excursion is its own component whatever else the journey does, so its
+    edges are breaks even on a one way. It also breaks in the middle: an
+    excursion leaves a point and comes back to it, which is a round trip in
+    miniature, and pricing it whole asks the tariff for a fare from Frankfurt
+    to Frankfurt that nobody has ever filed.
+
+    The turnaround break is worked out on the stripped journey and put back in
+    the full journey's own numbering, because a break index means nothing once
+    the elements have moved.
+    """
+    points = set()
+    for trip in excursions:
+        if trip.first > 0:
+            points.add(trip.first - 1)
+        if trip.last < len(itinerary.elements) - 1:
+            points.add(trip.last)
+        inside = _excursion_break(trip)
+        if inside is not None:
+            points.add(inside)
+
+    if kind is not JourneyType.ONE_WAY:
+        turn = _turnaround_break(itinerary, excursions)
+        if turn is not None:
+            points.add(turn)
+
+    return tuple(sorted(points))
+
+
+def _excursion_break(trip: SideTrip) -> int | None:
+    """Where an excursion turns round, in the full journey's numbering."""
+    if len(trip.elements) < 2:
+        return None
+    turn = Itinerary(list(trip.elements)).turnaround_index()
+    if turn <= 0 or turn >= len(trip.elements):
+        return None
+    return trip.first + turn - 1
+
+
+def _turnaround_break(itinerary: Itinerary, excursions: tuple[SideTrip, ...]) -> int | None:
+    """Where the journey turns round, counted in the full element list."""
+    stripped = strip_side_trips(itinerary, excursions)
+    turn = stripped.turnaround_index()
+    if turn <= 0 or turn >= len(stripped.elements):
+        return None
+
+    kept = [
+        index
+        for index in range(len(itinerary.elements))
+        if not any(trip.first <= index <= trip.last for trip in excursions)
+    ]
+    return kept[turn - 1]
 
 
 def _assemble(

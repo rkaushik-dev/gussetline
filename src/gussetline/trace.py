@@ -27,6 +27,10 @@ from typing import Any
 class Stage(str, Enum):
     """The parts of a price that can each pass or refuse on their own."""
 
+    # What kind of journey this is, which everything after it reads. First
+    # because a shape read wrong breaks the fare in the wrong place and every
+    # later stage then argues about the wrong component.
+    SHAPE = "shape"
     SELECTION = "selection"
     ROUTING = "routing"
     MILEAGE = "mileage"

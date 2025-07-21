@@ -404,3 +404,80 @@ def test_the_same_routing_is_charged_or_not_by_the_clock_alone(
         "420.00"
     )
     assert price(stopping, loaded, flat_converter, TICKETING, "EUR").total_nuc == Decimal("480.00")
+
+
+def a_side_trip_journey() -> Itinerary:
+    """Frankfurt to New York, by way of a week in Vienna."""
+    return Itinerary(
+        [
+            segment("LH", "100", "FRA", "VIE", "2025-03-04 08:00", "2025-03-04 09:30"),
+            segment("LH", "101", "VIE", "FRA", "2025-03-11 18:00", "2025-03-11 19:30"),
+            segment("LH", "400", "FRA", "JFK", "2025-03-12 10:25", "2025-03-12 13:05"),
+        ]
+    )
+
+
+@pytest.fixture
+def with_vienna(transatlantic_miles):
+    fares = TariffStore()
+    fares.add(fare("FRA", "JFK", "620.00", owrt=OwRt.ONE_WAY_ONLY, basis="KOW"))
+    fares.add(
+        fare(
+            "FRA",
+            "VIE",
+            "90.00",
+            owrt=OwRt.ONE_WAY_ONLY,
+            basis="KVIE",
+            global_indicator=GlobalIndicator.EH,
+        )
+    )
+    fares.add(
+        fare(
+            "VIE",
+            "FRA",
+            "90.00",
+            owrt=OwRt.ONE_WAY_ONLY,
+            basis="KVIE",
+            global_indicator=GlobalIndicator.EH,
+        )
+    )
+    miles = MileageTable()
+    miles.add("FRA", "JFK", 3851)
+    miles.add("FRA", "VIE", 380)
+    combos = CombinabilityStore()
+    for basis in ("KOW", "KVIE"):
+        combos.add(combinable(basis=basis))
+    return Tariffs(fares=fares, miles=miles, combinability=combos)
+
+
+def test_an_excursion_prices_as_its_own_component(flat_converter, with_vienna):
+    result = price(a_side_trip_journey(), with_vienna, flat_converter, TICKETING, "EUR")
+    bases = [c.fare.fare_basis for c in result.construction.components if c.fare]
+    assert bases.count("KVIE") == 2
+    assert "KOW" in bases
+
+
+def test_the_excursion_is_kept_off_the_transatlantic_component(flat_converter, with_vienna):
+    # Vienna on the path would put a thousand miles east onto a fare that has
+    # nothing to do with it, and the component would fail the ladder.
+    result = price(a_side_trip_journey(), with_vienna, flat_converter, TICKETING, "EUR")
+    atlantic = [c for c in result.construction.components if c.off_point == "NYC"]
+    assert len(atlantic) == 1
+    assert atlantic[0].via_points == ()
+
+
+def test_the_shape_is_read_after_the_excursion_comes_out(flat_converter, with_vienna):
+    result = price(a_side_trip_journey(), with_vienna, flat_converter, TICKETING, "EUR")
+    shapes = [s for s in result.trace if s.stage is Stage.SHAPE]
+    assert shapes
+    assert "leaving a OW" in str(shapes[0])
+
+
+def test_the_whole_thing_still_adds_up(flat_converter, with_vienna):
+    result = price(a_side_trip_journey(), with_vienna, flat_converter, TICKETING, "EUR")
+    assert result.total_nuc == Decimal("800.00")
+
+
+def test_a_journey_with_no_excursion_records_no_shape_note(flat_converter, tariffs):
+    result = price(round_trip(), tariffs, flat_converter, TICKETING, "EUR")
+    assert [s for s in result.trace if s.stage is Stage.SHAPE] == []

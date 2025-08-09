@@ -30,13 +30,11 @@ from datetime import date, datetime
 import click
 
 from gussetline.cli.desk import Desk, pass_desk
-from gussetline.distance import default_mileage_table
-from gussetline.engine import Priced, Tariffs, price
+from gussetline.engine import Priced, price
 from gussetline.errors import GussetlineError
 from gussetline.exchange import Converter, default_roe_table
-from gussetline.itinerary import Itinerary
+from gussetline.persistence import snapshot
 from gussetline.spec import parse, render
-from gussetline.tariff import TariffStore, filing_pairs
 
 
 @click.command("price")
@@ -59,7 +57,8 @@ def price_it(
     itinerary = parse(entry, when)
     desk.say(render(itinerary))
 
-    tariffs = _tariffs(desk, itinerary, when, carrier)
+    with desk.database.unit() as work:
+        tariffs = snapshot.for_itinerary(work, itinerary, when, carrier)
     converter = Converter(default_roe_table())
 
     priced = price(
@@ -74,35 +73,6 @@ def price_it(
     _show(desk, priced, why)
     if not priced.issuable:
         raise SystemExit(1)
-
-
-def _tariffs(desk: Desk, itinerary: Itinerary, when: date, carrier: str | None) -> Tariffs:
-    """Pull the fares this itinerary could possibly use, and no others.
-
-    Every carrier on the itinerary is asked for, city pair by city pair, and
-    the sale window is applied in the query rather than afterwards. Reading
-    the whole fares table for one entry works on a laptop and stops working
-    the week the second carrier is loaded.
-    """
-    store = TariffStore()
-    wanted = list(dict.fromkeys([carrier.upper()] if carrier else list(itinerary.carriers)))
-
-    with desk.database.unit() as work:
-        for code in wanted:
-            for origin, destination in _pairs(itinerary):
-                store.add_many(work.tariff.search(code, origin, destination, when))
-        joins = work.combinability.store_for(wanted)
-
-    # The maximum permitted mileages ship with the package rather than coming
-    # out of the database. A fare whose routing map is missing prices on
-    # mileage instead, so an empty table does not refuse the fare, it makes
-    # the check itself fail on a city pair it has never heard of.
-    return Tariffs(fares=store, miles=default_mileage_table(), combinability=joins)
-
-
-def _pairs(itinerary: Itinerary) -> list[tuple[str, str]]:
-    """Every city pair a fare could be filed for on this itinerary."""
-    return filing_pairs([itinerary.origin, *[e.destination for e in itinerary.elements]])
 
 
 def _breaks(raw: str) -> tuple[int, ...] | None:
@@ -145,7 +115,8 @@ def price_or_say(desk: Desk, entry: str, when: date) -> None:
     """
     try:
         itinerary = parse(entry, when)
-        tariffs = _tariffs(desk, itinerary, when, None)
+        with desk.database.unit() as work:
+            tariffs = snapshot.for_itinerary(work, itinerary, when)
         priced = price(
             itinerary,
             tariffs,

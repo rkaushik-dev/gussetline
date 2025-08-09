@@ -28,13 +28,11 @@ import click
 
 from gussetline.audit import Audit, Finding, audit
 from gussetline.cli.desk import Desk, pass_desk
-from gussetline.distance import default_mileage_table
-from gussetline.engine import Tariffs
 from gussetline.errors import GussetlineError
 from gussetline.exchange import Converter, default_roe_table
 from gussetline.offers import Offer
+from gussetline.persistence import snapshot
 from gussetline.reports.discrepancy import build, render
-from gussetline.tariff import TariffStore, filing_pairs
 
 # How far back an audit looks when nobody says.
 DEFAULT_WINDOW_DAYS = 1
@@ -71,7 +69,8 @@ def audit_them(
         return
 
     desk.say(f"{len(offers)} offers since {first:%Y-%m-%d}")
-    tariffs = _tariffs(desk, offers, when)
+    with desk.database.unit() as work:
+        tariffs = snapshot.for_offers(work, offers, when)
     converter = Converter(default_roe_table())
 
     audits: list[Audit] = []
@@ -86,33 +85,6 @@ def audit_them(
     desk.say("")
     desk.say(render(report, limit=show))
     _our_gaps(desk, unpriceable, show)
-
-
-def _tariffs(desk: Desk, offers: list[Offer], when: date) -> Tariffs:
-    """One snapshot of the tariff for the whole run.
-
-    Every carrier that appears on any offer, and every city pair any of them
-    touched. Read once, because an audit that reprices against a moving
-    tariff produces findings that cannot be compared with each other.
-    """
-    carriers: list[str] = []
-    points: list[str] = []
-    for offer in offers:
-        carriers.extend(c for c in offer.carriers if c)
-        if offer.validating_carrier:
-            carriers.append(offer.validating_carrier)
-        points.extend([offer.origin, offer.destination])
-
-    store = TariffStore()
-    wanted = list(dict.fromkeys(c.upper() for c in carriers))
-    pairs = filing_pairs(points)
-    with desk.database.unit() as work:
-        for code in wanted:
-            for origin, destination in pairs:
-                store.add_many(work.tariff.search(code, origin, destination, when))
-        joins = work.combinability.store_for(wanted)
-
-    return Tariffs(fares=store, miles=default_mileage_table(), combinability=joins)
 
 
 def _our_gaps(desk: Desk, unpriceable: list[tuple[Offer, str]], show: int) -> None:

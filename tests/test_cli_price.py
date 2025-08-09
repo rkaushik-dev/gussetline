@@ -6,7 +6,6 @@ import pytest
 from click.testing import CliRunner
 
 from gussetline.cli.main import OPERATOR_CAN_FIX, cli, exit_code_for
-from gussetline.cli.price import _pairs
 from gussetline.collect.fixedwidth import write_record
 from gussetline.combinability import Combinability
 from gussetline.config import Settings
@@ -15,7 +14,6 @@ from gussetline.indicators import GlobalIndicator
 from gussetline.load.combinability import COMBINABILITY
 from gussetline.money import Money
 from gussetline.persistence.unitofwork import Database
-from gussetline.spec import parse
 from gussetline.tariff import Fare, FareType, OwRt
 
 TODAY = "2025-07-22"
@@ -190,32 +188,6 @@ def test_an_entry_that_will_not_read_is_refused_with_the_token(runner, env):
     assert isinstance(reply.exception, ValidationError)
     assert "not a flight" in str(reply.exception)
     assert exit_code_for(reply.exception) == OPERATOR_CAN_FIX
-
-
-def test_the_city_pairs_asked_for_cover_both_directions():
-    itinerary = parse(RETURN, date(2025, 7, 22))
-    pairs = _pairs(itinerary)
-    assert ("FRA", "NYC") in pairs
-    assert ("NYC", "FRA") in pairs
-
-
-def test_the_city_pairs_are_asked_for_once_each():
-    itinerary = parse(RETURN, date(2025, 7, 22))
-    pairs = _pairs(itinerary)
-    assert len(pairs) == len(set(pairs))
-
-
-def test_a_point_never_pairs_with_itself():
-    itinerary = parse(RETURN, date(2025, 7, 22))
-    assert all(left != right for left, right in _pairs(itinerary))
-
-
-def test_a_connection_adds_its_own_pairs():
-    itinerary = parse("FRA LH100 K 04AUG MUC LH400 K 04AUG JFK", date(2025, 7, 22))
-    pairs = _pairs(itinerary)
-    assert ("FRA", "MUC") in pairs
-    assert ("MUC", "NYC") in pairs
-    assert ("FRA", "NYC") in pairs
 
 
 def test_a_one_way_fare_prices_a_one_way_entry(runner, env):

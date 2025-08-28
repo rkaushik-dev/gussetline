@@ -19,7 +19,14 @@ from collections.abc import Awaitable, Callable
 from fastapi import FastAPI, Request, Response
 
 from gussetline.api import errors
-from gussetline.api.routers import health, observations, pricing, sources, watches
+from gussetline.api.routers import (
+    health,
+    observations,
+    pricing,
+    queue,
+    sources,
+    watches,
+)
 from gussetline.api.security import KeyRing
 from gussetline.config import Settings
 from gussetline.persistence.unitofwork import Database
@@ -60,6 +67,7 @@ def create_app(settings: Settings, database: Database, keyring: KeyRing | None =
     app.include_router(pricing.router)
     app.include_router(sources.router)
     app.include_router(watches.router)
+    app.include_router(queue.router)
 
     return app
 

@@ -5,6 +5,7 @@ from decimal import Decimal
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 
 from conftest import segment
 from gussetline.api.app import create_app
@@ -274,3 +275,96 @@ def test_the_openapi_document_is_served(client):
     reply = client.get("/openapi.json")
     assert reply.status_code == 200
     assert reply.json()["info"]["title"] == "gussetline"
+
+
+def a_queue_row(database, benefit="90.00", raised=date(2025, 7, 29), state="open"):
+    from gussetline.persistence.models import RecommendationRow, TicketRow, WatchRow
+
+    with database.unit() as work:
+        ticket = work.session.scalars(select(TicketRow)).first()
+        if ticket is None:
+            ticket = TicketRow(
+                number="220-1234567890",
+                record_locator="ABC123",
+                passenger_name="MUELLER/ANNA",
+                origin="FRA",
+                destination="JFK",
+                departure=date(2025, 8, 24),
+                issued_on=date(2025, 2, 14),
+                validating_carrier="LH",
+                base_amount=Decimal("840.00"),
+                base_currency="EUR",
+                total_amount=Decimal("1090.83"),
+            )
+            work.session.add(ticket)
+            work.session.flush()
+        watch = WatchRow(
+            ticket_id=ticket.id,
+            series_key="FRA-NYC-2025-08-24-Y",
+            origin="FRA",
+            destination="JFK",
+            departure=date(2025, 8, 24),
+            threshold_amount=Decimal("50.00"),
+            threshold_currency="EUR",
+        )
+        work.session.add(watch)
+        work.session.flush()
+        work.session.add(
+            RecommendationRow(
+                watch_id=watch.id,
+                raised_on=raised,
+                state=state,
+                paid_amount=Decimal("840.00"),
+                new_fare_amount=Decimal("700.00"),
+                penalty_amount=Decimal("50.00"),
+                benefit_amount=Decimal(benefit),
+                currency="EUR",
+                residual="refundable",
+            )
+        )
+        work.commit()
+
+
+def test_the_queue_of_an_empty_desk_is_empty(client):
+    body = client.get("/queue", params={"on": "2025-07-30"}).json()
+    assert body["open"] == 0
+    assert body["places"] == []
+    assert body["worth"]["amount"] == "0"
+
+
+def test_the_queue_carries_the_three_numbers_the_screen_shows(client, database):
+    a_queue_row(database)
+    body = client.get("/queue", params={"on": "2025-07-30"}).json()
+    assert body["open"] == 1
+    assert body["worth"] == {"amount": "90.00", "currency": "EUR"}
+    assert body["as_of"] == "2025-07-30"
+
+
+def test_a_place_says_why_it_is_where_it_is(client, database):
+    a_queue_row(database, raised=date(2025, 7, 28))
+    place = client.get("/queue", params={"on": "2025-07-30"}).json()["places"][0]
+    assert place["ticket_number"] == "220-1234567890"
+    assert place["urgent"] is True
+    assert "expires today" in place["why"]
+
+
+def test_a_score_crosses_the_wire_as_a_string(client, database):
+    # A float would round it differently in every client that read it.
+    a_queue_row(database)
+    place = client.get("/queue", params={"on": "2025-07-30"}).json()["places"][0]
+    assert isinstance(place["score"], str)
+
+
+def test_a_settled_recommendation_is_not_in_the_queue(client, database):
+    a_queue_row(database, state="taken")
+    assert client.get("/queue", params={"on": "2025-07-30"}).json()["open"] == 0
+
+
+def test_the_queue_can_be_capped_for_a_caller_that_wants_the_top_of_it(client, database):
+    a_queue_row(database)
+    body = client.get("/queue", params={"on": "2025-07-30", "limit": 1}).json()
+    assert len(body["places"]) == 1
+
+
+def test_a_limit_of_nothing_is_a_bad_request(client):
+    assert client.get("/queue", params={"limit": 0}).status_code == 422

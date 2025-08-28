@@ -228,3 +228,35 @@ class PageOut(BaseModel):
 PriceRequest.model_rebuild()
 ComponentOut.model_rebuild()
 PriceOut.model_rebuild()
+
+
+class PlaceOut(BaseModel):
+    """One recommendation as the worklist screen shows it."""
+
+    model_config = ConfigDict(frozen=True)
+
+    ticket_number: str
+    series_key: str
+    raised_on: date
+    expires_on: date
+    benefit: MoneyOut
+    # A string, like every other amount here. The score is a decimal and a
+    # float would round it differently in every client that read it.
+    score: str
+    days_left: int
+    days_out: int
+    urgent: bool
+    fare_moved: bool
+    why: str
+
+
+class QueueOut(BaseModel):
+    """The whole worklist, with the three numbers the screen shows at the top."""
+
+    model_config = ConfigDict(frozen=True)
+
+    as_of: date
+    open: int
+    urgent: int
+    worth: MoneyOut
+    places: list[PlaceOut]

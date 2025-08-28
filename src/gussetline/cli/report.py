@@ -28,9 +28,10 @@ from sqlalchemy.orm import selectinload
 from gussetline.cli.desk import Desk, pass_desk
 from gussetline.collect.registry import default_registry
 from gussetline.collect.schedule import Market, Schedule
+from gussetline.desk import queue as worklist
 from gussetline.desk.recommend import Recommendation
 from gussetline.persistence.deskmap import row_to_recommendation
-from gussetline.persistence.models import RecommendationRow, WatchRow
+from gussetline.persistence.models import RecommendationRow, TicketRow, WatchRow
 from gussetline.persistence.unitofwork import UnitOfWork
 from gussetline.reports import coverage as coverage_report
 from gussetline.reports import reliability as reliability_report
@@ -134,3 +135,45 @@ def _schedule(work: UnitOfWork, when: date) -> Schedule:
         if row.last_checked is not None:
             series.last_polled = row.last_checked.date()
     return schedule
+
+
+@report.command("queue")
+@click.option("--on", "today", type=click.DateTime(["%Y-%m-%d"]), default=None)
+@click.option("--show", type=int, default=20, help="How many places to print.")
+@click.option("--urgent", "only_urgent", is_flag=True, help="Only the ones for today.")
+@pass_desk
+def queue(desk: Desk, today: datetime | None, show: int, only_urgent: bool) -> None:
+    """What an agent should work through, in the order to work it.
+
+    The same list the worklist screen shows, for the mornings when nobody
+    wants to open a browser.
+    """
+    when = today.date() if today else date.today()
+
+    with desk.database.unit() as work:
+        rows = _open_rows(work)
+        made = [row_to_recommendation(r, r.watch.ticket.number, r.watch.series_key) for r in rows]
+        departures = {row.watch.series_key: row.watch.departure for row in rows}
+
+    places = worklist.build(made, when, departures)
+    if only_urgent:
+        places = worklist.urgent(places)
+
+    click.echo(worklist.render(places, limit=show))
+    if places:
+        currency = made[0].currency
+        click.echo(f"worth {worklist.worth_of(places, currency)}")
+
+
+def _open_rows(work: UnitOfWork) -> list[RecommendationRow]:
+    return list(
+        work.session.scalars(
+            select(RecommendationRow)
+            .options(
+                selectinload(RecommendationRow.watch)
+                .selectinload(WatchRow.ticket)
+                .selectinload(TicketRow.coupons)
+            )
+            .where(RecommendationRow.state == "open")
+        ).all()
+    )

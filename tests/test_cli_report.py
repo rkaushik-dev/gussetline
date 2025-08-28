@@ -289,3 +289,54 @@ def test_none_of_the_reports_writes_anything(runner, env):
 
         rows = work.session.scalars(select(RecommendationRow)).all()
         assert [row.state for row in rows] == ["open"]
+
+
+def test_the_queue_command_shows_up_in_the_group(runner, env):
+    assert "queue" in run(runner, "report", "--help").output
+
+
+def test_an_empty_desk_has_nothing_open(runner, env):
+    reply = run(runner, "report", "queue", "--on", TODAY)
+    assert reply.exit_code == 0
+    assert "nothing open" in reply.output
+
+
+def test_the_queue_lists_the_open_recommendations_with_what_they_are_worth(runner, env):
+    with database(env).unit() as work:
+        watch = a_watch(work)
+        a_recommendation(work, watch, date(2025, 7, 29), "open", "90.00")
+        work.commit()
+
+    reply = run(runner, "report", "queue", "--on", TODAY)
+    assert "1 open" in reply.output
+    assert "worth 90.00 EUR" in reply.output
+
+
+def test_the_queue_leaves_out_what_is_already_settled(runner, env):
+    with database(env).unit() as work:
+        watch = a_watch(work)
+        a_recommendation(work, watch, date(2025, 7, 29), "taken")
+        work.commit()
+
+    assert "nothing open" in run(runner, "report", "queue", "--on", TODAY).output
+
+
+def test_a_smaller_one_about_to_expire_comes_first(runner, env):
+    with database(env).unit() as work:
+        near = a_watch(work, series="FRA-NYC-2025-08-02-Y", departure=date(2025, 8, 2))
+        far = a_watch(work, series="FRA-NYC-2026-03-01-Y", departure=date(2026, 3, 1))
+        a_recommendation(work, near, date(2025, 7, 28), "open", "90.00")
+        a_recommendation(work, far, date(2025, 7, 30), "open", "200.00")
+        work.commit()
+
+    out = run(runner, "report", "queue", "--on", TODAY).output
+    assert out.index("90.00 EUR") < out.index("200.00 EUR")
+
+
+def test_the_urgent_flag_narrows_the_list(runner, env):
+    with database(env).unit() as work:
+        far = a_watch(work, series="FRA-NYC-2026-03-01-Y", departure=date(2026, 3, 1))
+        a_recommendation(work, far, date(2025, 7, 30), "open", "200.00")
+        work.commit()
+
+    assert "nothing open" in run(runner, "report", "queue", "--on", TODAY, "--urgent").output

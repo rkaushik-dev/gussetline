@@ -30,6 +30,7 @@ import click
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
+from gussetline import logs
 from gussetline.cli.desk import Desk, pass_desk
 from gussetline.components import FareComponent
 from gussetline.desk.recommend import Recommendation
@@ -89,6 +90,19 @@ def night(desk: Desk, today: datetime | None, dry_run: bool) -> None:
         report = run(watches, book, rules, when, desk.settings.selling_currency)
 
         _say(desk, report, len(rules.missing))
+        logs.event(
+            "night.priced",
+            on=when,
+            looked_at=report.looked_at,
+            raised=len(report.raised),
+            withdrawn=len(report.withdrawn),
+            retired=len(report.retired),
+            expired=report.expired,
+            held_back=report.held_back,
+            no_rule=len(rules.missing),
+            worth=report.benefit.amount,
+            dry=dry_run,
+        )
         if dry_run:
             desk.say("dry run, nothing written")
             return
@@ -96,6 +110,14 @@ def night(desk: Desk, today: datetime | None, dry_run: bool) -> None:
         _write(work, rows, watches, report)
         work.commit()
 
+    for made in report.raised:
+        logs.event(
+            "night.raised",
+            ticket=made.ticket_number,
+            series=made.series_key,
+            worth=made.benefit.amount,
+            currency=made.currency,
+        )
     desk.say(f"wrote {len(report.raised)} recommendations")
 
 

@@ -20,7 +20,7 @@ import sys
 
 import click
 
-from gussetline import __version__
+from gussetline import __version__, logs
 from gussetline.cli.desk import (
     FIXABLE,
     OK,
@@ -50,17 +50,33 @@ __all__ = [
 @click.group(context_settings={"help_option_names": ["-h", "--help"]})
 @click.option("--database", "database_url", default=None, help="Override the database url.")
 @click.option("--quiet", is_flag=True, help="Say nothing on success.")
+@click.option("--log-level", default=None, help="How much to write to the log.")
 # The version comes off the package itself and not off the installed
 # distribution, because the desk runs this straight out of a checkout
 # and asking the metadata there raises rather than answering.
 @click.version_option(version=__version__, prog_name="gussetline")
 @click.pass_context
-def cli(ctx: click.Context, database_url: str | None, quiet: bool) -> None:
+def cli(ctx: click.Context, database_url: str | None, quiet: bool, log_level: str | None) -> None:
     """Fare audit and reprice desk."""
+    # Quiet means quiet. A cron run told to say nothing on success that
+    # still writes a line per event fills the night shift's mail, and the
+    # level can still be named explicitly when somebody wants both.
+    logs.setup(log_level or ("WARNING" if quiet else "INFO"))
+    # One identifier for the whole command, on every line it writes. Two runs
+    # that overlap otherwise produce one interleaved file and no way to pull
+    # either of them out, which is the file somebody needs on the morning
+    # both of them went wrong.
+    ctx.with_resource(logs.run())
+
     settings = from_env()
     if database_url:
         settings = settings.with_database(database_url)
     ctx.obj = Desk(settings=settings, database=Database(settings), quiet=quiet)
+    logs.event(
+        "command.started",
+        command=ctx.invoked_subcommand or "",
+        database=settings.database_url,
+    )
 
 
 @cli.command()

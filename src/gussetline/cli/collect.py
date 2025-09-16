@@ -32,6 +32,7 @@ from datetime import date, datetime
 
 import click
 
+from gussetline import logs
 from gussetline.cli.desk import Desk, pass_desk
 from gussetline.collect import calendar as calendar_feed
 from gussetline.collect import gds as gds_feed
@@ -102,6 +103,25 @@ def run_it(desk: Desk, today: datetime | None, supplier: str | None, budget: int
         identifier = row.id
 
     _report(desk, report, rig)
+    logs.event(
+        "collect.ran",
+        on=when,
+        tasks=len(report.results),
+        calls=report.calls,
+        offers=report.offers,
+        kept=kept.written,
+        seen_before=kept.moved,
+        cost=report.cost(rig.registry),
+        run=identifier,
+    )
+    for failure in report.failures():
+        logs.problem(
+            "collect.failed",
+            supplier=failure.task.supplier,
+            market=failure.task.market.key,
+            outcome=failure.outcome.value,
+            why=failure.reason,
+        )
     desk.say(f"kept {kept.written} offers, {kept.moved} already seen")
     desk.say(f"kept as run {identifier}")
 

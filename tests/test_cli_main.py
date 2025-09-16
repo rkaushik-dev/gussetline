@@ -123,3 +123,41 @@ def test_the_version_is_reported(runner):
     reply = runner.invoke(cli, ["--version"])
     assert reply.exit_code == 0
     assert "0.1.0" in reply.output
+
+
+def test_the_log_says_which_command_started(runner, on_disk):
+    reply = runner.invoke(cli, ["--database", on_disk, "create-schema"])
+    assert "event=command.started" in reply.output
+    assert "command=create-schema" in reply.output
+
+
+def test_every_line_of_one_command_shares_a_run_identifier(runner, on_disk):
+    reply = runner.invoke(cli, ["--database", on_disk, "create-schema"])
+    runs = {
+        part
+        for line in reply.output.splitlines()
+        for part in line.split()
+        if part.startswith("run=")
+    }
+    assert len(runs) == 1
+
+
+def test_two_commands_do_not_share_one(runner, on_disk):
+    first = runner.invoke(cli, ["--database", on_disk, "create-schema"]).output
+    second = runner.invoke(cli, ["--database", on_disk, "check"]).output
+    assert first.split("run=")[1][:12] != second.split("run=")[1][:12]
+
+
+def test_quiet_means_quiet_on_the_log_as_well(runner, on_disk):
+    # A cron run told to say nothing on success that still writes a line per
+    # event fills the night shift's mail.
+    reply = runner.invoke(cli, ["--database", on_disk, "--quiet", "create-schema"])
+    assert "event=" not in reply.output
+
+
+def test_the_level_can_still_be_named_when_somebody_wants_both(runner, on_disk):
+    reply = runner.invoke(
+        cli, ["--database", on_disk, "--quiet", "--log-level", "INFO", "create-schema"]
+    )
+    assert "event=command.started" in reply.output
+    assert "schema built" not in reply.output

@@ -7,9 +7,13 @@ out the cadence, and prints the list. It is the command somebody runs when the
 question is why a market was not looked at, and it costs nothing, so it can be
 run against production at any time.
 
-Running does the same thing and then goes out. It writes the run to the
+Running does the same thing and then goes out, across several workers, capped
+per host so no supplier is asked six times at once. It writes the run to the
 database, because every reading anybody has about the collectors is built out
 of those rows and out of nothing else.
+
+A replay stays on one thread. There is no far end to wait on, so the pool would
+buy nothing and cost the reproducibility that makes a replay worth having.
 
 Replaying does the same thing against the archive instead of the suppliers,
 and it writes the offers without writing the run. Those two are different
@@ -37,6 +41,7 @@ from gussetline.cli.desk import Desk, pass_desk
 from gussetline.collect import calendar as calendar_feed
 from gussetline.collect import gds as gds_feed
 from gussetline.collect import ndc as ndc_feed
+from gussetline.collect import pool
 from gussetline.collect.harvest import Adapter, Harvest
 from gussetline.collect.registry import Capability
 from gussetline.collect.rig import Rig, build, live_fetch, replay_fetch
@@ -80,8 +85,15 @@ def plan_only(desk: Desk, today: datetime | None, supplier: str | None, budget: 
 @click.option("--on", "today", type=click.DateTime(["%Y-%m-%d"]), default=None)
 @click.option("--supplier", default=None, help="Only this one.")
 @click.option("--budget", type=int, default=None, help="Cap the tasks per supplier.")
+@click.option("--workers", type=int, default=pool.WORKERS, help="How many calls at once.")
 @pass_desk
-def run_it(desk: Desk, today: datetime | None, supplier: str | None, budget: int | None) -> None:
+def run_it(
+    desk: Desk,
+    today: datetime | None,
+    supplier: str | None,
+    budget: int | None,
+    workers: int,
+) -> None:
     """Poll what is due and keep the run."""
     when = today.date() if today else date.today()
     rig = build(desk.settings, parsers=dict(PARSERS))
@@ -95,8 +107,15 @@ def run_it(desk: Desk, today: datetime | None, supplier: str | None, budget: int
 
     with desk.database.unit() as work:
         kept = _keeper(work)
-        report = rig.collector().run(
-            plan.tasks, when, live_fetch(rig), rig.parsers, schedule, kept.sink
+        report = pool.run(
+            rig.collector(),
+            plan.tasks,
+            when,
+            live_fetch(rig),
+            rig.parsers,
+            schedule,
+            kept.sink,
+            workers=workers,
         )
         row = work.runs.record(report, finished=rig.now())
         work.commit()

@@ -135,7 +135,7 @@ class Collector:
         self.limiter = limiter
         self.breakers = breakers
         self.archive = archive
-        self._now = now
+        self._clock = now
 
     def run(
         self,
@@ -147,7 +147,7 @@ class Collector:
         sink: Sink | None = None,
     ) -> RunReport:
         """Work through a plan, recording what every task did."""
-        report = RunReport(started=self._now())
+        report = RunReport(started=self.now())
 
         for task in tasks:
             supplier = self.registry.get(task.supplier)
@@ -163,11 +163,22 @@ class Collector:
                 report.results.append(Result(task, Outcome.BUDGET, reason=budget.last_reason))
                 continue
 
-            report.results.append(self._one(supplier, task, today, fetch, parsers, schedule, sink))
+            report.results.append(
+                self.run_one(supplier, task, today, fetch, parsers, schedule, sink)
+            )
 
         return report
 
-    def _one(
+    def now(self) -> datetime:
+        """What this collector calls the current moment.
+
+        A method rather than an attribute because the pool needs it too, and
+        a run whose start and whose results disagree about the clock is a run
+        that cannot be lined up against the archive.
+        """
+        return self._clock()
+
+    def run_one(
         self,
         supplier: Supplier,
         task: Task,
@@ -177,7 +188,8 @@ class Collector:
         schedule: Schedule | None,
         sink: Sink | None = None,
     ) -> Result:
-        seen = self._now()
+        """One task, start to finish. Public because the pool calls it too."""
+        seen = self.now()
         try:
             response = fetch(supplier, task)
         except GussetlineError as exc:

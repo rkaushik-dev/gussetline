@@ -277,6 +277,21 @@ class ObservationRepository:
             statement = statement.limit(limit)
         return [row_to_offer(row) for row in self.session.scalars(statement).all()]
 
+    def prune(self, before: date) -> int:
+        """Drop the readings for departures that have gone. Returns how many.
+
+        Keyed on the departure and not on when the row was written. A row
+        written in March about a December departure is still worth reading in
+        November, and one written yesterday about a departure last week is
+        not: nobody will ever ask what that fare was.
+        """
+        rows = self.session.scalars(
+            select(ObservationRow).where(ObservationRow.departure < before)
+        ).all()
+        for row in rows:
+            self.session.delete(row)
+        return len(rows)
+
     def count(self) -> int:
         return self.session.scalar(select(func.count()).select_from(ObservationRow)) or 0
 

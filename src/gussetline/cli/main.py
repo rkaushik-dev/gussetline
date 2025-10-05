@@ -129,6 +129,7 @@ def register() -> None:
     from gussetline.cli.price import price_it
     from gussetline.cli.prune import prune
     from gussetline.cli.report import report
+    from gussetline.cli.seed import seed
     from gussetline.cli.serve import issue_key, serve
     from gussetline.cli.watch import watch
 
@@ -143,6 +144,7 @@ def register() -> None:
         serve,
         issue_key,
         prune,
+        seed,
     ):
         if command.name and command.name not in cli.commands:
             cli.add_command(command)

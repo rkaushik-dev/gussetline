@@ -59,7 +59,12 @@ class TicketRow(Base, TimestampMixin):
     coupons: Mapped[list[CouponRow]] = relationship(
         back_populates="ticket", cascade="all, delete-orphan", order_by="CouponRow.position"
     )
-    watches: Mapped[list[WatchRow]] = relationship(back_populates="ticket")
+    # A watch goes with its ticket. Everything that reads a watch reads the
+    # ticket through it, so one left behind is a row nothing can load and the
+    # night run trips over it rather than skipping it.
+    watches: Mapped[list[WatchRow]] = relationship(
+        back_populates="ticket", cascade="all, delete-orphan"
+    )
 
     def __repr__(self) -> str:
         return f"<Ticket {self.number} {self.origin}{self.destination}>"

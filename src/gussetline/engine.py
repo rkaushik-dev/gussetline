@@ -147,7 +147,14 @@ def price(
     refused: list[str] = []
     for component in components:
         built, said = _price_component(
-            component, itinerary, tariffs, converter, ticketing, stopovers, trail
+            component,
+            itinerary,
+            tariffs,
+            converter,
+            ticketing,
+            stopovers,
+            trail,
+            one_way=kind is JourneyType.ONE_WAY and len(components) == 1,
         )
         priced.append(built)
         refused.extend(said)
@@ -177,6 +184,7 @@ def _price_component(
     ticketing: date,
     stopovers: tuple[str, ...],
     trail: Trace,
+    one_way: bool = False,
 ) -> tuple[FareComponent, list[str]]:
     """Take one component from unpriced to fully charged.
 
@@ -193,6 +201,7 @@ def _price_component(
         converter,
         ticketing,
         allowances=tariffs.allowances,
+        one_way=one_way,
         trace=trail,
     )
     with_fare = apply_fare(component, chosen)

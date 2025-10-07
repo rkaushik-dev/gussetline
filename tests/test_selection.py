@@ -12,7 +12,7 @@ from gussetline.flights import Cabin
 from gussetline.indicators import GlobalIndicator
 from gussetline.routing import RoutingMap, RoutingStore
 from gussetline.selection import apply_selection, select
-from gussetline.tariff import TariffStore
+from gussetline.tariff import OwRt, TariffStore
 from gussetline.trace import Stage, Trace
 
 TICKETING = date(2025, 2, 14)
@@ -262,3 +262,60 @@ def test_a_business_fare_is_not_dropped_for_being_dearer(flat_converter, transat
         direct("J"), store, RoutingStore(), transatlantic_miles, flat_converter, TICKETING
     )
     assert chosen.chosen.fare.cabin is Cabin.BUSINESS
+
+
+def test_a_round_trip_half_is_not_offered_to_a_one_way(flat_converter, transatlantic_miles):
+    # A half is not a cheap fare, it is half of one. Considering it lets it
+    # win on price and fail at assembly, which reads as a broken engine
+    # rather than as a market with no one way filed.
+    store = TariffStore()
+    store.add(fare("FRA", "JFK", "420.00", basis="KHALF"))
+    store.add(fare("FRA", "JFK", "560.00", basis="KOW", owrt=OwRt.ONE_WAY_ONLY))
+
+    chosen = select(
+        direct(),
+        store,
+        RoutingStore(),
+        transatlantic_miles,
+        flat_converter,
+        TICKETING,
+        one_way=True,
+    )
+    assert chosen.chosen.fare.fare_basis == "KOW"
+    assert any("cannot stand on its own" in reason for _, reason in chosen.rejected)
+
+
+def test_a_round_trip_half_is_the_cheapest_fare_when_it_may_be_used(
+    flat_converter, transatlantic_miles
+):
+    store = TariffStore()
+    store.add(fare("FRA", "JFK", "420.00", basis="KHALF"))
+    store.add(fare("FRA", "JFK", "560.00", basis="KOW", owrt=OwRt.ONE_WAY_ONLY))
+
+    chosen = select(
+        direct(),
+        store,
+        RoutingStore(),
+        transatlantic_miles,
+        flat_converter,
+        TICKETING,
+    )
+    assert chosen.chosen.fare.fare_basis == "KHALF"
+
+
+def test_a_one_way_with_nothing_but_halves_filed_says_which_rule_refused(
+    flat_converter, transatlantic_miles
+):
+    store = TariffStore()
+    store.add(fare("FRA", "JFK", "420.00", basis="KHALF"))
+
+    with pytest.raises(NoFareFound, match="every published fare was refused"):
+        select(
+            direct(),
+            store,
+            RoutingStore(),
+            transatlantic_miles,
+            flat_converter,
+            TICKETING,
+            one_way=True,
+        )

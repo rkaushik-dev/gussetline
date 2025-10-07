@@ -30,7 +30,7 @@ from gussetline.indicators import indicator_matches
 from gussetline.mileage import ExtraMileageAllowance, MileageResult
 from gussetline.mileage import check as mileage_check
 from gussetline.routing import RoutingStore
-from gussetline.tariff import Fare, TariffStore
+from gussetline.tariff import Fare, OwRt, TariffStore
 from gussetline.trace import Stage, Trace
 
 
@@ -91,9 +91,16 @@ def select(
     ticketing: date,
     *,
     allowances: ExtraMileageAllowance | None = None,
+    one_way: bool = False,
     trace: Trace | None = None,
 ) -> Selection:
-    """Pick the cheapest fare that survives every check, or say why none did."""
+    """Pick the cheapest fare that survives every check, or say why none did.
+
+    ``one_way`` says this component will stand on its own, which decides
+    whether a round trip half may be considered at all. It is passed in and
+    not worked out here: a component does not know what it will be assembled
+    into, and the journey above it does.
+    """
     if not component.segments:
         raise NoFareFound("a component with no flown sector cannot be priced")
 
@@ -122,6 +129,12 @@ def select(
     rejected: list[tuple[str, str]] = []
 
     for fare in filed:
+        if one_way and fare.owrt is OwRt.ROUND_TRIP_HALF:
+            # A half is not a cheap fare, it is half of one. Considering it
+            # here lets it win on price and fail at assembly, which reads as
+            # a broken engine rather than as a market with no one way filed.
+            rejected.append((fare.fare_basis, "a round trip half cannot stand on its own"))
+            continue
         if not indicator_matches(fare.global_indicator, indicator):
             rejected.append(
                 (

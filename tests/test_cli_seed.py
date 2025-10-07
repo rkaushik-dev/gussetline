@@ -146,3 +146,12 @@ def test_the_departure_it_invents_is_far_enough_out_to_be_watched(runner, env):
         departures = [row.departure for row in work.watches.live(date(2025, 11, 3))]
     assert len(departures) == 2
     assert all(departure > date(2025, 11, 3) for departure in departures)
+
+
+def test_a_seeded_desk_prices_a_one_way_off_the_one_way_fare(runner, env):
+    # Not the cheaper round trip half, which cannot stand on its own.
+    run(runner, "seed", "--on", TODAY)
+    reply = run(runner, "price", "FRA LH400 K 18DEC JFK", "--on", TODAY)
+    assert reply.exit_code == 0
+    assert "KOW" in reply.output
+    assert "KLWAP7RT" not in reply.output

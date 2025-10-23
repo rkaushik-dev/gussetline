@@ -20,17 +20,13 @@ from __future__ import annotations
 from datetime import date
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import select
-from sqlalchemy.orm import selectinload
 
 from gussetline.api import security
 from gussetline.api.deps import get_unit
 from gussetline.api.schemas import MoneyOut, PlaceOut, QueueOut
 from gussetline.desk import queue as worklist
 from gussetline.desk.recommend import Recommendation
-from gussetline.desk.watch import Observation
-from gussetline.persistence.deskmap import observation_row_to_reading, row_to_recommendation
-from gussetline.persistence.models import ObservationRow, RecommendationRow, WatchRow
+from gussetline.persistence.book import open_book
 from gussetline.persistence.unitofwork import UnitOfWork
 
 router = APIRouter(prefix="/queue", tags=["queue"], dependencies=[Depends(security.reader)])
@@ -48,12 +44,10 @@ def read_queue(
 ) -> QueueOut:
     """The open recommendations, in the order they should be worked."""
     today = on or date.today()
-    rows = _open_rows(work)
-    made = [row_to_recommendation(r, r.watch.ticket.number, r.watch.series_key) for r in rows]
-    departures = {row.watch.series_key: row.watch.departure for row in rows}
-    histories = _histories(work, set(departures))
+    book = open_book(work, with_readings=True)
+    made = book.recommendations
 
-    places = worklist.build(made, today, departures, histories)
+    places = worklist.build(made, today, book.departures, book.histories)
     currency = made[0].currency if made else "EUR"
     return QueueOut(
         as_of=today,
@@ -62,35 +56,6 @@ def read_queue(
         worth=MoneyOut(amount=str(worklist.worth_of(places, currency).amount), currency=currency),
         places=[_place_out(place) for place in places[:limit]],
     )
-
-
-def _open_rows(work: UnitOfWork) -> list[RecommendationRow]:
-    return list(
-        work.session.scalars(
-            select(RecommendationRow)
-            .options(selectinload(RecommendationRow.watch).selectinload(WatchRow.ticket))
-            .where(RecommendationRow.state == "open")
-        ).all()
-    )
-
-
-def _histories(work: UnitOfWork, series: set[str]) -> dict[str, list[Observation]]:
-    """The last few readings per series, for the market check.
-
-    One query per series rather than one for all of them, because the limit
-    is per series and a single query would have to window over them. A few
-    hundred small indexed reads beat one clever one that nobody can read.
-    """
-    found: dict[str, list[Observation]] = {}
-    for key in sorted(series):
-        rows = work.session.scalars(
-            select(ObservationRow)
-            .where(ObservationRow.series_key == key)
-            .order_by(ObservationRow.last_seen.desc())
-            .limit(READINGS)
-        ).all()
-        found[key] = [observation_row_to_reading(row) for row in reversed(rows)]
-    return found
 
 
 def _place_out(place: worklist.Place) -> PlaceOut:

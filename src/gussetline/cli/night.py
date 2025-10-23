@@ -33,21 +33,18 @@ from sqlalchemy.orm import selectinload
 from gussetline import logs
 from gussetline.cli.desk import Desk, pass_desk
 from gussetline.components import FareComponent
-from gussetline.desk.recommend import Recommendation
 from gussetline.desk.session import Night, run
 from gussetline.desk.ticket import Coupon
-from gussetline.desk.watch import Observation, Watch
+from gussetline.desk.watch import Watch
 from gussetline.flights import Segment
 from gussetline.itinerary import Itinerary
+from gussetline.persistence.book import open_book, readings_for
 from gussetline.persistence.deskmap import (
     apply_recommendation,
-    observation_row_to_reading,
     recommendation_to_row,
-    row_to_recommendation,
     row_to_watch,
 )
 from gussetline.persistence.models import (
-    ObservationRow,
     RecommendationRow,
     TicketRow,
     WatchRow,
@@ -56,11 +53,6 @@ from gussetline.persistence.unitofwork import UnitOfWork
 from gussetline.rules.base import Category, Context, RuleSet, RuleStore
 from gussetline.rules.changes import VoluntaryChange
 from gussetline.rules.penalties import Penalty
-
-# How many readings a watch is given. The hysteresis is two or three, so a
-# handful is plenty, and reading a year of them for nine thousand watches is
-# how the first version of this took eleven minutes.
-READINGS = 8
 
 # A made up block time for a coupon, which carries a departure and no arrival.
 # Nothing in the reprice reads it; it exists so the segment will build.
@@ -84,8 +76,9 @@ def night(desk: Desk, today: datetime | None, dry_run: bool) -> None:
             desk.say("no live watches")
             return
 
-        watches = [_watch_from(work, row) for row in rows]
-        book = _open_book(work)
+        histories = readings_for(work, [row.series_key for row in rows])
+        watches = [row_to_watch(row, histories.get(row.series_key, [])) for row in rows]
+        book = open_book(work).recommendations
         rules = _rules_for(work, watches, when)
         report = run(watches, book, rules, when, desk.settings.selling_currency)
 
@@ -131,45 +124,6 @@ def _live(work: UnitOfWork, when: date) -> list[WatchRow]:
             .order_by(WatchRow.departure)
         ).all()
     )
-
-
-def _watch_from(work: UnitOfWork, row: WatchRow) -> Watch:
-    """One watch with the last few readings on it, oldest first.
-
-    Oldest first because the hysteresis reads the tail of the list, and a
-    history in the other order would report the dearest of the oldest few.
-
-    A stored observation is a price and not a poll. The table is keyed on
-    content, so a market that sat at the same number for three mornings is one
-    row with a sighting count of three, and reading one reading off it tells
-    the hysteresis that the price has been seen once. That is the difference
-    between a drop that has held for three days and one seen this morning, so
-    each row is expanded by the number of times it was actually seen.
-    """
-    rows = work.session.scalars(
-        select(ObservationRow)
-        .where(ObservationRow.series_key == row.series_key)
-        .order_by(ObservationRow.last_seen.desc())
-        .limit(READINGS)
-    ).all()
-
-    history: list[Observation] = []
-    for stored in reversed(rows):
-        reading = observation_row_to_reading(stored)
-        history.extend([reading] * max(stored.sightings, 1))
-    return row_to_watch(row, history[-READINGS:])
-
-
-def _open_book(work: UnitOfWork) -> list[Recommendation]:
-    """Every recommendation still open, as the objects the session moves."""
-    rows = work.session.scalars(
-        select(RecommendationRow)
-        .options(selectinload(RecommendationRow.watch).selectinload(WatchRow.ticket))
-        .where(RecommendationRow.state == "open")
-    ).all()
-    return [
-        row_to_recommendation(row, row.watch.ticket.number, row.watch.series_key) for row in rows
-    ]
 
 
 class Rules:

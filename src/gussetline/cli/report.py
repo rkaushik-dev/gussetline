@@ -23,15 +23,13 @@ from datetime import date, datetime, timedelta
 
 import click
 from sqlalchemy import select
-from sqlalchemy.orm import selectinload
 
 from gussetline.cli.desk import Desk, pass_desk
 from gussetline.collect.registry import default_registry
 from gussetline.collect.schedule import Market, Schedule
 from gussetline.desk import queue as worklist
-from gussetline.desk.recommend import Recommendation
-from gussetline.persistence.deskmap import row_to_recommendation
-from gussetline.persistence.models import RecommendationRow, TicketRow, WatchRow
+from gussetline.persistence.book import open_book, raised_between
+from gussetline.persistence.models import WatchRow
 from gussetline.persistence.unitofwork import UnitOfWork
 from gussetline.reports import coverage as coverage_report
 from gussetline.reports import reliability as reliability_report
@@ -59,7 +57,7 @@ def savings(desk: Desk, since: datetime | None, until: datetime | None) -> None:
     first = since.date() if since else last - timedelta(days=SAVINGS_DAYS)
 
     with desk.database.unit() as work:
-        made = _recommendations(work, first, last)
+        made = raised_between(work, first, last)
 
     built = savings_report.build(made, desk.settings.selling_currency, first=first, last=last)
     click.echo(savings_report.render(built))
@@ -103,25 +101,6 @@ def coverage(desk: Desk, today: datetime | None, runs: int, show: int) -> None:
         raise SystemExit(1)
 
 
-def _recommendations(work: UnitOfWork, first: date, last: date) -> list[Recommendation]:
-    """Every recommendation raised in a window, with its watch already in.
-
-    The window is on the day it was raised and not on the day it was settled,
-    because a recommendation belongs to the month the desk found it in. A
-    report keyed on the settlement moves rows between months every time an
-    agent works through a backlog.
-    """
-    rows = work.session.scalars(
-        select(RecommendationRow)
-        .options(selectinload(RecommendationRow.watch).selectinload(WatchRow.ticket))
-        .where(RecommendationRow.raised_on >= first, RecommendationRow.raised_on <= last)
-        .order_by(RecommendationRow.raised_on)
-    ).all()
-    return [
-        row_to_recommendation(row, row.watch.ticket.number, row.watch.series_key) for row in rows
-    ]
-
-
 def _schedule(work: UnitOfWork, when: date) -> Schedule:
     """The schedule as the live watches describe it.
 
@@ -151,11 +130,10 @@ def queue(desk: Desk, today: datetime | None, show: int, only_urgent: bool) -> N
     when = today.date() if today else date.today()
 
     with desk.database.unit() as work:
-        rows = _open_rows(work)
-        made = [row_to_recommendation(r, r.watch.ticket.number, r.watch.series_key) for r in rows]
-        departures = {row.watch.series_key: row.watch.departure for row in rows}
+        book = open_book(work)
 
-    places = worklist.build(made, when, departures)
+    made = book.recommendations
+    places = worklist.build(made, when, book.departures)
     if only_urgent:
         places = worklist.urgent(places)
 
@@ -163,17 +141,3 @@ def queue(desk: Desk, today: datetime | None, show: int, only_urgent: bool) -> N
     if places:
         currency = made[0].currency
         click.echo(f"worth {worklist.worth_of(places, currency)}")
-
-
-def _open_rows(work: UnitOfWork) -> list[RecommendationRow]:
-    return list(
-        work.session.scalars(
-            select(RecommendationRow)
-            .options(
-                selectinload(RecommendationRow.watch)
-                .selectinload(WatchRow.ticket)
-                .selectinload(TicketRow.coupons)
-            )
-            .where(RecommendationRow.state == "open")
-        ).all()
-    )

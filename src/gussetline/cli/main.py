@@ -30,7 +30,7 @@ from gussetline.cli.desk import (
     exit_code_for,
     pass_desk,
 )
-from gussetline.config import from_env
+from gussetline.config import from_env, what_is_set
 from gussetline.errors import GussetlineError
 from gussetline.persistence.unitofwork import Database
 
@@ -89,6 +89,17 @@ def settings(desk: Desk) -> None:
     click.echo(f"archive    {desk.settings.archive_root}")
     click.echo(f"threshold  {desk.settings.watch_threshold} {desk.settings.selling_currency}")
     click.echo(f"dry run    {'yes' if desk.settings.dry_run else 'no'}")
+
+    # What was actually chosen, rather than a screen of defaults with the one
+    # that matters buried in it.
+    chosen = what_is_set()
+    click.echo("")
+    if chosen:
+        click.echo("set in the environment:")
+        for name in sorted(chosen):
+            click.echo(f"  {name}={chosen[name]}")
+    else:
+        click.echo("nothing is set in the environment, so these are all defaults")
 
 
 @cli.command("create-schema")

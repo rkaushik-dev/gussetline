@@ -162,3 +162,45 @@ def from_env(env: Mapping[str, str] | None = None) -> Settings:
         honour_robots=_read_bool(values, "HONOUR_ROBOTS", Settings.honour_robots),
         dry_run=_read_bool(values, "DRY_RUN", Settings.dry_run),
     )
+
+
+# Every setting the environment can carry, in the order the settings command
+# prints them. Written out rather than derived from the dataclass, because the
+# README lists these by name and a test walks both lists: a setting renamed in
+# one place and not the other is then a named failure rather than a knob that
+# quietly stops working.
+ENVIRONMENT_NAMES: tuple[str, ...] = (
+    "DATABASE_URL",
+    "ARCHIVE_ROOT",
+    "SELLING_CURRENCY",
+    "COUNTRY_OF_SALE",
+    "DAILY_QUOTA",
+    "RATE_PER_SECOND",
+    "BURST",
+    "REQUEST_TIMEOUT",
+    "RETRY_ATTEMPTS",
+    "BREAKER_THRESHOLD",
+    "BREAKER_COOLDOWN",
+    "MATERIAL_DIFFERENCE",
+    "WATCH_THRESHOLD",
+    "CREDIT_DISCOUNT",
+    "USER_AGENT",
+    "HONOUR_ROBOTS",
+    "DRY_RUN",
+)
+
+
+def environment_names() -> tuple[str, ...]:
+    """What a caller may set, fully prefixed, in a settled order."""
+    return tuple(f"{PREFIX}{name}" for name in ENVIRONMENT_NAMES)
+
+
+def what_is_set(env: Mapping[str, str] | None = None) -> dict[str, str]:
+    """Which of them this process actually has, and to what.
+
+    For the settings command, which is the first thing anybody checks when a
+    run does something surprising. A value that is not set does not appear:
+    the point is to see what was chosen, and a screen of defaults buries it.
+    """
+    values = env if env is not None else os.environ
+    return {name: values[name] for name in environment_names() if name in values}

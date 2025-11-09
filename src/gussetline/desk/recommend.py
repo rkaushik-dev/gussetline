@@ -79,6 +79,10 @@ class Recommendation:
     residual: Residual
     fare_bases: tuple[str, ...] = field(default_factory=tuple)
     fingerprint: str = ""
+    # What the fare being recommended includes. Copied like every other
+    # number here, and empty where the supplier did not say, which is a
+    # different thing from no allowance and reads differently on the screen.
+    baggage: str = ""
     state: State = State.OPEN
     decided_on: date | None = None
     decided_by: str = ""
@@ -183,6 +187,7 @@ def raise_from(
         residual=decision.residual,
         fare_bases=decision.watch.ticket.fare_bases(),
         fingerprint=decision.observation.fingerprint,
+        baggage=str(decision.observation.baggage) if decision.observation.baggage.is_stated else "",
         lifetime_days=lifetime,
     )
 

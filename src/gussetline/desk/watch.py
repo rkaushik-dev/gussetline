@@ -30,7 +30,7 @@ from gussetline.errors import ValidationError
 from gussetline.flights import Cabin
 from gussetline.geography import city_of
 from gussetline.money import Money
-from gussetline.offers import Offer
+from gussetline.offers import Baggage, Offer
 
 # How many polls in a row a drop has to hold before the desk hears about it.
 DEFAULT_HYSTERESIS = 2
@@ -56,7 +56,15 @@ class Observation:
     fingerprint: str = ""
     source: str = ""
 
+    # What the fare includes, which is not part of the price and changes what
+    # the price is worth. Carried rather than compared: the desk knows what a
+    # supplier is offering and does not yet know what the ticket in hand
+    # allows, so an agent on the phone is the one who can tell.
+    baggage: Baggage = field(default_factory=Baggage)
+
     def __str__(self) -> str:
+        if self.baggage.is_stated:
+            return f"{self.seen_on.isoformat()} {self.amount} {self.baggage}"
         return f"{self.seen_on.isoformat()} {self.amount}"
 
 
@@ -179,6 +187,7 @@ def threshold_for(change_fee: Money, margin: Money) -> Money:
 def observation_from(offer: Offer, seen_on: date) -> Observation:
     return Observation(
         seen_on=seen_on,
+        baggage=offer.baggage,
         amount=offer.breakdown.base,
         fingerprint=offer.fingerprint(),
         source=offer.source,

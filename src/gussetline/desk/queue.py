@@ -74,6 +74,11 @@ class Place:
         """Whether this one goes today whatever else is on the list."""
         return self.days_left <= 1 or self.days_out <= 3
 
+    @property
+    def baggage(self) -> str:
+        """What the fare being recommended includes, or nothing said."""
+        return self.recommendation.baggage
+
     def why(self) -> str:
         parts = []
         if self.days_left <= 1:
@@ -84,6 +89,11 @@ class Place:
             parts.append("departs within three days")
         if self.fare_moved:
             parts.append("the market has been dearer since")
+        if self.baggage:
+            # Said on the queue rather than left for the phone call, because
+            # an agent who finds out about a smaller allowance halfway
+            # through the call has already quoted the saving.
+            parts.append(f"includes {self.baggage}")
         return ", ".join(parts) or "no hurry"
 
     def __str__(self) -> str:

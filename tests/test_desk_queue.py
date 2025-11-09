@@ -243,3 +243,19 @@ def test_the_rendered_queue_stops_at_the_limit_and_says_so():
         departures,
     )
     assert "and 3 more" in render(places, limit=2)
+
+
+def test_a_place_says_what_the_new_fare_includes():
+    # An agent who finds out about a smaller allowance halfway through the
+    # call has already quoted the saving.
+    row = made()
+    row.baggage = "1PC"
+    place = build([row], TODAY, {row.series_key: FAR})[0]
+    assert place.baggage == "1PC"
+    assert "includes 1PC" in place.why()
+
+
+def test_a_place_says_nothing_when_the_supplier_said_nothing():
+    place = build([made()], TODAY, {"FRA-NYC-2026-03-01-Y": FAR})[0]
+    assert place.baggage == ""
+    assert "includes" not in place.why()

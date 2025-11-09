@@ -268,3 +268,50 @@ def test_the_last_check_reads_as_a_day_or_as_nothing():
     assert latest_check(row) is None
     row.last_checked = datetime(2025, 7, 2, 6, 0)
     assert latest_check(row) == date(2025, 7, 2)
+
+
+def test_the_allowance_survives_the_round_trip():
+    made = recommendation()
+    made.baggage = "2PC"
+    row = recommendation_to_row(made)
+    back = row_to_recommendation(row, made.ticket_number, made.series_key)
+    assert back.baggage == "2PC"
+
+
+def test_the_allowance_does_not_swallow_the_note_it_rides_with():
+    made = recommendation()
+    made.baggage = "1PC"
+    made.take(date(2025, 7, 2), "anna", "customer agreed")
+    row = recommendation_to_row(made)
+    back = row_to_recommendation(row, made.ticket_number, made.series_key)
+    assert back.note == "customer agreed"
+    assert back.baggage == "1PC"
+
+
+def test_a_recommendation_with_no_allowance_reads_back_with_none():
+    made = recommendation()
+    row = recommendation_to_row(made)
+    back = row_to_recommendation(row, made.ticket_number, made.series_key)
+    assert back.baggage == ""
+    assert back.note == ""
+
+
+def test_a_reading_carries_what_the_fare_included():
+    row = ObservationRow(
+        series_key="FRA-NYC-2025-08-04-Y",
+        source="gds",
+        fingerprint="a" * 32,
+        origin="FRA",
+        destination="JFK",
+        departure=DEPARTURE,
+        cabin="Y",
+        base_amount=Decimal("620.00"),
+        base_currency="EUR",
+        total_amount=Decimal("790.83"),
+        bag_pieces=2,
+        first_seen=datetime(2025, 7, 1, 6, 0),
+        last_seen=datetime(2025, 7, 2, 6, 0),
+    )
+    reading = observation_row_to_reading(row)
+    assert reading.baggage.pieces == 2
+    assert "2PC" in str(reading)

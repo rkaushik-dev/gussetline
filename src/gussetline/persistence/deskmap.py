@@ -37,6 +37,7 @@ from gussetline.desk.watch import Observation, Retired, Watch
 from gussetline.errors import ValidationError
 from gussetline.flights import Cabin
 from gussetline.money import Money
+from gussetline.offers import Baggage
 from gussetline.persistence.models import (
     CouponRow,
     ObservationRow,
@@ -193,6 +194,7 @@ def observation_row_to_reading(row: ObservationRow) -> Observation:
         amount=Money(row.total_amount, row.base_currency),
         fingerprint=row.fingerprint,
         source=row.source,
+        baggage=Baggage(pieces=row.bag_pieces),
     )
 
 
@@ -210,7 +212,7 @@ def recommendation_to_row(made: Recommendation, watch_id: int | None = None) -> 
         observation_fingerprint=made.fingerprint,
         decided_on=made.decided_on,
         decided_by=made.decided_by[:32],
-        note=made.note[:256],
+        note=_with_baggage(made.note, made.baggage)[:256],
     )
     if watch_id is not None:
         row.watch_id = watch_id
@@ -241,7 +243,8 @@ def row_to_recommendation(
         state=State(row.state),
         decided_on=row.decided_on,
         decided_by=row.decided_by,
-        note=row.note,
+        note=_without_baggage(row.note),
+        baggage=_baggage_in(row.note),
     )
 
 
@@ -282,3 +285,25 @@ def check_series_key(row: WatchRow) -> None:
 
 def latest_check(row: WatchRow) -> date | None:
     return row.last_checked.date() if row.last_checked is not None else None
+
+
+# The allowance rides in the note column rather than in one of its own. It is
+# a short string the desk reads and never groups by, and a column would be a
+# migration for something that has never been queried.
+BAGGAGE_MARK = "baggage="
+
+
+def _with_baggage(note: str, baggage: str) -> str:
+    if not baggage:
+        return note
+    return f"{note} {BAGGAGE_MARK}{baggage}".strip()
+
+
+def _without_baggage(note: str) -> str:
+    return note.split(BAGGAGE_MARK)[0].strip()
+
+
+def _baggage_in(note: str) -> str:
+    if BAGGAGE_MARK not in note:
+        return ""
+    return note.split(BAGGAGE_MARK, 1)[1].split()[0]

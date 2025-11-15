@@ -58,6 +58,11 @@ class FareRow(Base, TimestampMixin):
     __table_args__ = (
         Index("ix_fares_market", "carrier", "origin", "destination"),
         Index("ix_fares_lookup", "carrier", "origin", "destination", "effective"),
+        # The night run gets from a ticket's fare basis to its rule and has
+        # no market to narrow on. Without this it takes the market index for
+        # its carrier prefix alone, which on a real tariff is most of the
+        # table read to find one row.
+        Index("ix_fares_basis", "carrier", "fare_basis"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)

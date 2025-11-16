@@ -108,13 +108,12 @@ def test_health_is_up_without_touching_storage(client):
     assert reply.json() == {"status": "up"}
 
 
-def test_ready_reaches_the_database_and_counts_what_is_in_it(client):
+def test_ready_says_only_that_it_can_reach_the_database(client):
+    # Cheap on purpose. Something polls this every few seconds, and the
+    # counts it used to carry read two tables for a number nobody looked at.
     reply = client.get("/ready")
     assert reply.status_code == 200
-    body = reply.json()
-    assert body["status"] == "ready"
-    assert body["currency"] == "EUR"
-    assert body["observations"] == 0
+    assert reply.json() == {"status": "ready"}
 
 
 def test_every_response_carries_a_request_id(client):
@@ -368,3 +367,93 @@ def test_the_queue_can_be_capped_for_a_caller_that_wants_the_top_of_it(client, d
 
 def test_a_limit_of_nothing_is_a_bad_request(client):
     assert client.get("/queue", params={"limit": 0}).status_code == 422
+
+
+def test_an_empty_desk_is_reachable_and_not_fit(client):
+    # Up, reachable and completely useless. Readiness answers yes to all of
+    # that, because the database is right there and it is empty.
+    assert client.get("/ready").status_code == 200
+
+    reply = client.get("/fit")
+    assert reply.status_code == 503
+    body = reply.json()
+    assert body["status"] == "unfit"
+    assert "tariff" in body["missing"]
+
+
+def test_every_finding_names_the_command_that_fixes_it(client):
+    # The person reading this at seven is not the person who wrote it.
+    checks = client.get("/fit").json()["checks"]
+    assert "run load fares" in checks["tariff"]["detail"]
+    assert "run load rules" in checks["rules"]["detail"]
+    assert "run load combinability" in checks["combinability"]["detail"]
+    assert "run collect run" in checks["collecting"]["detail"]
+
+
+def test_a_desk_that_last_collected_in_march_is_not_collecting(client, database):
+    # However many rows it holds. The count is the reassuring number and the
+    # date is the true one.
+    from datetime import datetime as when
+
+    from gussetline.collect.registry import Outcome
+    from gussetline.collect.run import Result, RunReport
+    from gussetline.collect.schedule import Market, Task
+
+    with database.unit() as work:
+        work.runs.record(
+            RunReport(
+                started=when(2025, 3, 1, 6, 0),
+                results=[
+                    Result(
+                        task=Task(
+                            supplier="gds",
+                            market=Market("FRA", "JFK"),
+                            departure=date(2025, 8, 4),
+                            days_out=1,
+                        ),
+                        outcome=Outcome.OK,
+                        attempts=1,
+                    )
+                ],
+            )
+        )
+        work.commit()
+
+    checks = client.get("/fit").json()["checks"]
+    assert not checks["collecting"]["ok"]
+    assert "2025-03-01" in checks["collecting"]["detail"]
+
+
+def test_a_desk_that_collected_today_is_collecting(client, database):
+    from datetime import datetime as when
+
+    from gussetline.collect.registry import Outcome
+    from gussetline.collect.run import Result, RunReport
+    from gussetline.collect.schedule import Market, Task
+
+    with database.unit() as work:
+        work.runs.record(
+            RunReport(
+                started=when.now(),
+                results=[
+                    Result(
+                        task=Task(
+                            supplier="gds",
+                            market=Market("FRA", "JFK"),
+                            departure=date(2025, 8, 4),
+                            days_out=1,
+                        ),
+                        outcome=Outcome.OK,
+                        attempts=1,
+                    )
+                ],
+            )
+        )
+        work.commit()
+
+    checks = client.get("/fit").json()["checks"]
+    assert checks["collecting"]["ok"]
+
+
+def test_fitness_names_the_currency_the_desk_quotes_in(client):
+    assert client.get("/fit").json()["currency"] == "EUR"

@@ -21,6 +21,7 @@ import sys
 import click
 
 from gussetline import __version__, logs
+from gussetline.api.routers.health import checks as fitness
 from gussetline.cli.desk import (
     FIXABLE,
     OK,
@@ -111,20 +112,43 @@ def create_schema(desk: Desk) -> None:
 
 
 @cli.command()
+@click.option("--fit", is_flag=True, help="Ask whether the desk can do its job.")
 @pass_desk
-def check(desk: Desk) -> None:
-    """Say whether the database is reachable and what is in it."""
+def check(desk: Desk, fit: bool) -> None:
+    """Say what is in the desk, and optionally whether that is enough.
+
+    The counts on their own are a reading and not a verdict: two hundred
+    thousand observations is a reassuring number whether or not any of them
+    arrived this month. The flag asks the same questions the service answers
+    on its fitness endpoint, and exits one when something is missing, so a
+    cron job can gate the night run on it.
+    """
     with desk.database.unit() as work:
         airports = work.airports.count()
         observations = work.observations.count()
         fares = work.tariff.count_fares()
         joins = work.combinability.count()
         runs = work.runs.count()
+        checks = fitness(work) if fit else {}
+
     click.echo(f"airports      {airports}")
     click.echo(f"fares         {fares}")
     click.echo(f"combinability {joins}")
     click.echo(f"observations  {observations}")
     click.echo(f"runs          {runs}")
+
+    if not fit:
+        return
+
+    click.echo("")
+    missing = [name for name, (ok, _) in checks.items() if not ok]
+    for name, (ok, detail) in checks.items():
+        click.echo(f"{'ok ' if ok else 'no '} {name:<14} {detail}")
+
+    if missing:
+        desk.warn("")
+        desk.warn(f"not fit: {', '.join(missing)}")
+        raise SystemExit(OPERATOR_CAN_FIX)
 
 
 def register() -> None:

@@ -72,8 +72,8 @@ def fit(
     fixes it, because the person reading this at seven is not the person who
     wrote it.
     """
-    checks = _checks(work)
-    missing = [name for name, (ok, _) in checks.items() if not ok]
+    found = checks(work)
+    missing = [name for name, (ok, _) in found.items() if not ok]
     if missing:
         response.status_code = 503
 
@@ -81,12 +81,15 @@ def fit(
         "status": "fit" if not missing else "unfit",
         "currency": settings.selling_currency,
         "missing": missing,
-        "checks": {name: {"ok": ok, "detail": detail} for name, (ok, detail) in checks.items()},
+        "checks": {name: {"ok": ok, "detail": detail} for name, (ok, detail) in found.items()},
     }
 
 
-def _checks(work: UnitOfWork) -> dict[str, tuple[bool, str]]:
+def checks(work: UnitOfWork) -> dict[str, tuple[bool, str]]:
     """What a desk needs, each with what to do about it.
+
+    Public, because the command line asks the same questions and two copies
+    of this list would answer differently within a month.
 
     Ordered the way somebody would fix them: without fares nothing prices, and
     a rule with no fare pointing at it is harmless, so the tariff comes first.

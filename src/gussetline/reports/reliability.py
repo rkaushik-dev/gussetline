@@ -36,6 +36,7 @@ from enum import Enum
 
 from gussetline.collect.registry import Outcome
 from gussetline.collect.run import RunReport
+from gussetline.reports import layout
 
 # Below this share of answered calls a supplier is not worth planning against.
 UNFIT_ANSWER_RATE = Decimal("0.50")
@@ -239,23 +240,33 @@ def _fold(health: Health, outcome: Outcome, attempts: int, offers: int, problems
 
 
 def render(report: Reliability) -> str:
-    """The report as the operator reads it at eight in the morning."""
-    lines = [f"reliability over {report.runs} runs"]
-    if report.first and report.last:
-        lines.append(f"{report.first:%Y-%m-%d %H:%M} to {report.last:%Y-%m-%d %H:%M}")
-    lines.append("")
-    for health in report.suppliers:
-        lines.append(str(health))
-        lines.append(
-            f"  planned {health.planned} called {health.attempted} "
-            f"answered {health.answered} repeats {health.repeats}"
-        )
-        if health.throttled:
-            lines.append(f"  throttled {health.throttled}, which is our pacing and not theirs")
-        if health.budget:
-            lines.append(f"  {health.budget} skipped on the budget")
-        if health.problems:
-            lines.append(f"  {health.problems} offers in the payloads did not parse")
+    """The report as the operator reads it at eight in the morning.
+
+    Per supplier and not aggregated, because the aggregate of one supplier
+    refusing everything and three answering everything is a reassuring number
+    that describes nobody.
+    """
     if not report.suppliers:
-        lines.append("nothing ran")
-    return "\n".join(lines)
+        return layout.page(layout.heading(f"reliability over {report.runs} runs"), ["nothing ran"])
+
+    window = [f"{report.first:%Y-%m-%d %H:%M} to {report.last:%Y-%m-%d %H:%M}"]
+    return layout.page(
+        layout.heading(f"reliability over {report.runs} runs", *(window if report.first else ())),
+        *(_supplier(health) for health in report.suppliers),
+    )
+
+
+def _supplier(health: Health) -> list[str]:
+    """One supplier, with the counts that explain the grade above them."""
+    lines = [
+        str(health),
+        f"  planned {health.planned} called {health.attempted} "
+        f"answered {health.answered} repeats {health.repeats}",
+    ]
+    if health.throttled:
+        lines.append(f"  throttled {health.throttled}, which is our pacing and not theirs")
+    if health.budget:
+        lines.append(f"  {health.budget} skipped on the budget")
+    if health.problems:
+        lines.append(f"  {health.problems} offers in the payloads did not parse")
+    return lines

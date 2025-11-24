@@ -33,6 +33,7 @@ from decimal import Decimal
 
 from gussetline.audit import Audit, Finding
 from gussetline.money import Money
+from gussetline.reports import layout
 
 # How many offers have to agree before a group is worth writing about.
 CASE_THRESHOLD = 3
@@ -198,22 +199,18 @@ def build(audits: Iterable[Audit], currency: str) -> Discrepancy:
 
 def render(report: Discrepancy, limit: int = 10) -> str:
     """The report as it goes to the person who writes the letters."""
-    lines = [
-        f"discrepancies in {report.currency}",
-        "",
-        f"audited        {report.audited}",
-        f"agreed         {report.agreed}",
-        f"not priceable  {report.not_priceable}",
-        f"other currency {report.other_currency}",
-        f"claims         {len(report.claims)} worth {report.claim_value}",
-        f"noise          {report.noise} findings in groups too small to send",
-    ]
-    claims = report.claims
-    if claims:
-        lines.extend(["", "worth a letter"])
-        lines.extend(f"  {case}" for case in claims[:limit])
-    gaps = report.our_gaps
-    if gaps:
-        lines.extend(["", "fares we do not hold, which is ours to fix"])
-        lines.extend(f"  {case}" for case in gaps[:limit])
-    return "\n".join(lines)
+    return layout.page(
+        layout.heading(f"discrepancies in {report.currency}"),
+        layout.figures(
+            [
+                ("audited", report.audited),
+                ("agreed", report.agreed),
+                ("not priceable", report.not_priceable),
+                ("other currency", report.other_currency),
+                ("claims", f"{len(report.claims)} worth {report.claim_value}"),
+                ("noise", f"{report.noise} findings in groups too small to send"),
+            ]
+        ),
+        layout.section("worth a letter", report.claims, limit),
+        layout.section("fares we do not hold, which is ours to fix", report.our_gaps, limit),
+    )

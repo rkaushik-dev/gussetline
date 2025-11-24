@@ -133,8 +133,8 @@ def test_the_report_group_lists_its_three_commands(runner, env):
 def test_savings_on_an_empty_desk_is_all_zeroes(runner, env):
     reply = run(runner, "report", "savings", "--until", TODAY)
     assert reply.exit_code == 0
-    assert "found     0 EUR" in reply.output
-    assert "raised    0" in reply.output
+    assert "found      0 EUR" in reply.output
+    assert "raised     0" in reply.output
 
 
 def test_savings_counts_what_was_found_taken_and_missed(runner, env):
@@ -146,9 +146,9 @@ def test_savings_counts_what_was_found_taken_and_missed(runner, env):
         work.commit()
 
     reply = run(runner, "report", "savings", "--until", TODAY)
-    assert "found     200.00 EUR" in reply.output
-    assert "taken     90.00 EUR" in reply.output
-    assert "missed    70.00 EUR" in reply.output
+    assert "found      200.00 EUR" in reply.output
+    assert "taken      90.00 EUR" in reply.output
+    assert "missed     70.00 EUR" in reply.output
 
 
 def test_savings_is_keyed_on_the_day_it_was_raised(runner, env):

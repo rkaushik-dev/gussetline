@@ -216,14 +216,14 @@ def test_the_rendered_report_separates_the_letters_from_our_own_gaps():
     out = render(build(rows, "EUR"))
     assert "worth a letter" in out
     assert "fares we do not hold" in out
-    assert "claims         1 worth 9.00 EUR" in out
+    assert "claims          1 worth 9.00 EUR" in out
 
 
 def test_the_rendered_report_leaves_out_the_sections_it_has_nothing_for():
     out = render(build([agreed()], "EUR"))
     assert "worth a letter" not in out
     assert "fares we do not hold" not in out
-    assert "audited        1" in out
+    assert "audited         1" in out
 
 
 def test_the_rendered_report_honours_the_limit():
@@ -232,3 +232,21 @@ def test_the_rendered_report_honours_the_limit():
         rows += [finding(basis=f"KLWAP7R{index}") for _ in range(3)]
     out = render(build(rows, "EUR"), limit=2)
     assert out.count("worth 9.00 EUR") == 2
+
+
+def test_a_cut_list_of_claims_says_how_many_there_were():
+    # It used to stop at the limit and say nothing, so a report with eleven
+    # claims printed ten and looked complete. The person who writes the
+    # letters had no way to know about the eleventh.
+    rows = []
+    for index in range(6):
+        rows += [finding(basis=f"KLWAP7R{index}") for _ in range(3)]
+    out = render(build(rows, "EUR"), limit=2)
+    assert "worth a letter, showing 2 of 6" in out
+
+
+def test_a_list_of_claims_that_fits_says_nothing_about_the_count():
+    rows = [finding() for _ in range(3)]
+    out = render(build(rows, "EUR"), limit=10)
+    assert "worth a letter" in out
+    assert "showing" not in out

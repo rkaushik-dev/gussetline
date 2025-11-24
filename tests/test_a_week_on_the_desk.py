@@ -274,9 +274,9 @@ def test_a_week_on_the_desk(runner, env, home):
 
     # Saturday morning, the three reports.
     savings = run(runner, "report", "savings", "--since", "2025-08-01", "--until", "2025-08-09")
-    assert "found     100.00 EUR" in savings.output
-    assert "taken     0 EUR" in savings.output
-    assert "open      1" in savings.output
+    assert "found      100.00 EUR" in savings.output
+    assert "taken      0 EUR" in savings.output
+    assert "open       1" in savings.output
 
     reliability = run(runner, "report", "reliability")
     assert "ndc        sound" in reliability.output
@@ -288,8 +288,8 @@ def test_a_week_on_the_desk(runner, env, home):
     # An agent takes it, and the savings report moves.
     _take_it(env)
     settled = run(runner, "report", "savings", "--since", "2025-08-01", "--until", "2025-08-09")
-    assert "taken     100.00 EUR" in settled.output
-    assert "take rate 1.00 over 1 decided" in settled.output
+    assert "taken      100.00 EUR" in settled.output
+    assert "take rate  1.00 over 1 decided" in settled.output
 
 
 def _collect_for_real(runner) -> None:

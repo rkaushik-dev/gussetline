@@ -128,14 +128,14 @@ def test_an_offer_that_agrees_with_the_tariff_is_counted_and_goes_no_further(run
     store(env, [offer(total="620.00")], [fare(amount="620.00")])
     reply = run(runner, "audit", "--on", TODAY, "--since", "2025-07-01")
     assert "1 offers since 2025-07-01" in reply.output
-    assert "agreed         1" in reply.output
+    assert "agreed          1" in reply.output
 
 
 def test_one_offer_out_on_its_own_is_noise_and_not_a_letter(runner, env):
     store(env, [offer(total="640.00")], [fare(amount="620.00")])
     reply = run(runner, "audit", "--on", TODAY, "--since", "2025-07-01")
-    assert "claims         0" in reply.output
-    assert "noise          1" in reply.output
+    assert "claims          0" in reply.output
+    assert "noise           1" in reply.output
 
 
 def test_enough_offers_agreeing_about_the_gap_becomes_a_letter(runner, env):
@@ -144,7 +144,7 @@ def test_enough_offers_agreeing_about_the_gap_becomes_a_letter(runner, env):
     offers = [offer(total="640.00", day=day) for day in (4, 5, 6)]
     store(env, offers, [fare(amount="620.00")])
     reply = run(runner, "audit", "--on", TODAY, "--since", "2025-07-01")
-    assert "claims         1" in reply.output
+    assert "claims          1" in reply.output
     assert "worth a letter" in reply.output
 
 
@@ -153,15 +153,15 @@ def test_an_offer_the_tariff_cannot_price_is_kept_apart_from_the_findings(runner
     # buries thirty letters under nine hundred rows of our own gaps.
     store(env, [offer()], [])
     reply = run(runner, "audit", "--on", TODAY, "--since", "2025-07-01")
-    assert "not priceable  1" in reply.output
-    assert "claims         0" in reply.output
+    assert "not priceable   1" in reply.output
+    assert "claims          0" in reply.output
 
 
 def test_the_ones_we_could_not_price_never_reach_a_group(runner, env):
     store(env, [offer(day=day) for day in (4, 5, 6)], [])
     reply = run(runner, "audit", "--on", TODAY, "--since", "2025-07-01")
-    assert "not priceable  3" in reply.output
-    assert "noise          0" in reply.output
+    assert "not priceable   3" in reply.output
+    assert "noise           0" in reply.output
     assert "worth a letter" not in reply.output
 
 
@@ -212,7 +212,7 @@ def test_a_supplier_below_our_price_is_our_gap_and_never_a_claim(runner, env):
     offers = [offer(total="500.00", day=day) for day in (4, 5, 6)]
     store(env, offers, [fare(amount="620.00")])
     reply = run(runner, "audit", "--on", TODAY, "--since", "2025-07-01")
-    assert "claims         0" in reply.output
+    assert "claims          0" in reply.output
     assert "fares we do not hold, which is ours to fix" in reply.output
 
 

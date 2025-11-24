@@ -198,10 +198,10 @@ def test_the_rendered_report_carries_all_three_numbers():
         "EUR",
     )
     out = render(report)
-    assert "found     200.00 EUR" in out
-    assert "taken     90.00 EUR" in out
-    assert "missed    70.00 EUR" in out
-    assert "take rate 1.00 over 1 decided" in out
+    assert "found      200.00 EUR" in out
+    assert "taken      90.00 EUR" in out
+    assert "missed     70.00 EUR" in out
+    assert "take rate  1.00 over 1 decided" in out
 
 
 def test_the_rendered_report_leaves_out_the_groupings_when_there_are_none():

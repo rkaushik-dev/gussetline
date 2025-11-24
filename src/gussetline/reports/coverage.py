@@ -37,6 +37,7 @@ from gussetline.collect.registry import Capability, Registry
 from gussetline.collect.run import RunReport
 from gussetline.collect.schedule import Schedule, Series, interval_for
 from gussetline.errors import ValidationError
+from gussetline.reports import layout
 
 # How many of a series' own intervals may pass before it counts as late.
 LATE_AFTER_INTERVALS = 2
@@ -220,20 +221,19 @@ def _later(current: date | None, seen: date) -> date:
 
 def render(report: Coverage, limit: int = 20) -> str:
     """The report as the operator reads it, gaps first and the rest counted."""
-    lines = [
-        f"coverage on {report.as_of.isoformat()}",
-        "",
-        f"followed  {len(report.series)}",
-        f"live      {len(report.live)}",
-        f"priced    {len(report.with_cover(Cover.PRICED))}",
-        f"quoted    {len(report.with_cover(Cover.QUOTED))}",
-        f"late      {len(report.with_cover(Cover.LATE))}",
-        f"dark      {len(report.with_cover(Cover.DARK))}",
-        f"flown     {len(report.with_cover(Cover.FLOWN))}",
-        f"rate      {report.rate}",
-    ]
-    gaps = report.gaps()
-    if gaps:
-        lines.extend(["", f"gaps, worst first, showing {min(limit, len(gaps))} of {len(gaps)}"])
-        lines.extend(f"  {row}" for row in gaps[:limit])
-    return "\n".join(lines)
+    return layout.page(
+        layout.heading(f"coverage on {report.as_of.isoformat()}"),
+        layout.figures(
+            [
+                ("followed", len(report.series)),
+                ("live", len(report.live)),
+                ("priced", len(report.with_cover(Cover.PRICED))),
+                ("quoted", len(report.with_cover(Cover.QUOTED))),
+                ("late", len(report.with_cover(Cover.LATE))),
+                ("dark", len(report.with_cover(Cover.DARK))),
+                ("flown", len(report.with_cover(Cover.FLOWN))),
+                ("rate", report.rate),
+            ]
+        ),
+        layout.section("gaps, worst first", report.gaps(), limit),
+    )

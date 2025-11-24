@@ -32,6 +32,7 @@ from decimal import Decimal
 
 from gussetline.desk.recommend import Recommendation, State
 from gussetline.money import Money
+from gussetline.reports import layout
 
 
 @dataclass(frozen=True, slots=True)
@@ -152,22 +153,21 @@ def build(
 
 def render(report: Savings) -> str:
     """The report as the desk prints it, one line per row."""
-    lines = [
-        f"savings in {report.currency}",
-        "",
-        f"found     {report.overall.found}",
-        f"taken     {report.overall.realised}",
-        f"missed    {report.overall.missed}",
-        f"raised    {report.overall.raised}",
-        f"settled   {report.overall.settled}",
-        f"replaced  {report.overall.superseded}",
-        f"open      {report.overall.still_open}",
-        f"take rate {report.overall.take_rate} over {report.overall.decided} decided",
-    ]
-    if report.by_month:
-        lines.extend(["", "by month"])
-        lines.extend(f"  {line}" for line in report.by_month)
-    if report.by_agent:
-        lines.extend(["", "by agent"])
-        lines.extend(f"  {line}" for line in report.by_agent)
-    return "\n".join(lines)
+    overall = report.overall
+    return layout.page(
+        layout.heading(f"savings in {report.currency}"),
+        layout.figures(
+            [
+                ("found", overall.found),
+                ("taken", overall.realised),
+                ("missed", overall.missed),
+                ("raised", overall.raised),
+                ("settled", overall.settled),
+                ("replaced", overall.superseded),
+                ("open", overall.still_open),
+                ("take rate", f"{overall.take_rate} over {overall.decided} decided"),
+            ]
+        ),
+        layout.section("by month", report.by_month),
+        layout.section("by agent", report.by_agent),
+    )

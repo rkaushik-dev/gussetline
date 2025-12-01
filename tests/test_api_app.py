@@ -133,12 +133,21 @@ def test_two_requests_get_two_different_ids(client):
 
 
 def test_a_not_found_comes_back_in_the_one_error_shape(client):
-    reply = client.get("/observations/series/nothing-at-all")
+    reply = client.get("/observations/series/FRA-LON-2099-01-01-Y")
     assert reply.status_code == 404
     body = reply.json()
     assert body["code"] == "record.not_found"
-    assert body["details"]["series_key"] == "nothing-at-all"
+    assert body["details"]["series_key"] == "FRA-LON-2099-01-01-Y"
     assert body["request_id"]
+
+
+def test_a_series_key_that_is_not_one_is_refused_rather_than_looked_up(client):
+    # Both answers are empty, but a 404 tells a caller who mistyped the
+    # departure that the desk holds nothing for that series, which is not
+    # what happened.
+    reply = client.get("/observations/series/nothing-at-all")
+    assert reply.status_code == 422
+    assert reply.json()["details"]["key"] == "nothing-at-all"
 
 
 def test_the_error_body_carries_the_domain_code_and_not_an_http_one(client):

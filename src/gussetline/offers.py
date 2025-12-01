@@ -21,9 +21,9 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
 
+from gussetline import series
 from gussetline.errors import ValidationError
 from gussetline.flights import Cabin
-from gussetline.geography import city_of
 from gussetline.itinerary import Itinerary
 from gussetline.money import Money, total
 from gussetline.taxes import AppliedTax, carrier_total, government_total
@@ -181,20 +181,12 @@ class Offer:
         return hashlib.sha256("~".join(parts).encode("utf-8")).hexdigest()[:32]
 
     def series_key(self) -> tuple[str, str, str, str]:
-        """What groups observations into one watchable price series.
-
-        Cities and not airports. A watch is on a market and the tariff prices
-        one, so a series keyed on Newark never meets the watch keyed on New
-        York, and the two sit in the same database looking correct while the
-        night run finds nothing to reprice. This is the third place that
-        distinction has had to be made and it is the one that matters most,
-        because nothing raises when it is wrong.
-        """
-        return (
-            city_of(self.itinerary.origin),
-            city_of(self.itinerary.destination),
-            self.itinerary.departure.date().isoformat(),
-            self.cabin.value,
+        """What groups observations into one watchable price series."""
+        return series.parts(
+            self.itinerary.origin,
+            self.itinerary.destination,
+            self.itinerary.departure,
+            self.cabin,
         )
 
     def cheaper_than(self, other: Offer) -> bool:

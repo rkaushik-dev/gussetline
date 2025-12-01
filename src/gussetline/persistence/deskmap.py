@@ -31,6 +31,7 @@ from __future__ import annotations
 
 from datetime import date
 
+from gussetline import series
 from gussetline.desk.recommend import Recommendation, State
 from gussetline.desk.ticket import Coupon, CouponStatus, Ticket
 from gussetline.desk.watch import Observation, Retired, Watch
@@ -264,7 +265,7 @@ def apply_recommendation(row: RecommendationRow, made: Recommendation) -> Recomm
 
 def series_key_for_row(row: WatchRow) -> str:
     """What a watch row's series key should be, worked out from its own fields."""
-    return f"{row.origin}-{row.destination}-{row.departure.isoformat()}-{row.cabin}"
+    return series.key(row.origin, row.destination, row.departure, row.cabin)
 
 
 def check_series_key(row: WatchRow) -> None:

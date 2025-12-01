@@ -323,6 +323,15 @@ def test_retiring_something_that_is_not_there_is_a_not_found(runner, env):
     assert isinstance(reply.exception, NotFoundError)
 
 
+def test_retiring_something_that_is_not_a_series_key_says_which_argument_is_wrong(runner, env):
+    # A typo used to come back as no such watch, which sends somebody looking
+    # in the database for a row that was never going to be there.
+    reply = run(runner, "watch", "retire", "FRA-NYC-2099-1-1")
+    assert reply.exit_code != 0
+    assert isinstance(reply.exception, ValidationError)
+    assert "not a series key" in str(reply.exception)
+
+
 def test_retiring_twice_says_it_is_already_retired(runner, env):
     with database(env).unit() as work:
         a_ticket(work)

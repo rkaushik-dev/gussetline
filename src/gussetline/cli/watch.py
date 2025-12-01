@@ -31,6 +31,7 @@ import click
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
+from gussetline import series
 from gussetline.cli.desk import Desk, pass_desk
 from gussetline.desk.watch import Retired, default_margin, threshold_for
 from gussetline.errors import NotFoundError, ValidationError
@@ -132,7 +133,12 @@ def listing(desk: Desk, everything: bool, today: datetime | None) -> None:
 @click.argument("series_key")
 @pass_desk
 def retire(desk: Desk, series_key: str) -> None:
-    """Stop watching a series, and record that a person said so."""
+    """Stop watching a series, and record that a person said so.
+
+    The key is read before it is looked for, so a typo says which argument
+    is wrong instead of reporting that no such watch exists.
+    """
+    series.read(series_key.strip())
     with desk.database.unit() as work:
         row = work.session.scalars(
             select(WatchRow).where(WatchRow.series_key == series_key.strip())
@@ -160,10 +166,7 @@ def _ticket(work: UnitOfWork, number: str) -> TicketRow:
 
 
 def _series_key(ticket: TicketRow, cabin: Cabin) -> str:
-    return (
-        f"{city_of(ticket.origin)}-{city_of(ticket.destination)}-"
-        f"{ticket.departure.isoformat()}-{cabin.value}"
-    )
+    return series.key(ticket.origin, ticket.destination, ticket.departure, cabin)
 
 
 def _already(work: UnitOfWork, series: str) -> bool:

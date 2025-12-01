@@ -27,10 +27,11 @@ from decimal import Decimal
 
 import click
 
-from gussetline import logs
+from gussetline import logs, series
 from gussetline.cli.desk import Desk, pass_desk
 from gussetline.combinability import Combinability
 from gussetline.desk.ticket import Coupon, Ticket
+from gussetline.flights import Cabin
 from gussetline.geography import city_of
 from gussetline.indicators import GlobalIndicator
 from gussetline.money import Money
@@ -313,4 +314,4 @@ def _mornings(when: date) -> list[tuple[str, datetime, datetime, int]]:
 
 
 def _series(origin: str, destination: str, departure: date) -> str:
-    return f"{city_of(origin)}-{city_of(destination)}-{departure.isoformat()}-Y"
+    return series.key(origin, destination, departure, Cabin.ECONOMY)

@@ -135,7 +135,8 @@ def test_a_key_we_do_not_hold_is_unauthorised(client):
 
 
 def test_a_reader_can_read_observations(client):
-    reply = client.get("/observations/series/nothing", headers=as_key(client, "reader-key"))
+    key = "FRA-LON-2099-01-01-Y"
+    reply = client.get(f"/observations/series/{key}", headers=as_key(client, "reader-key"))
     # Not found rather than forbidden, which means the key got through.
     assert reply.status_code == 404
 

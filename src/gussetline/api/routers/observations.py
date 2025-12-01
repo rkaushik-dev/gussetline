@@ -12,6 +12,7 @@ from datetime import date
 
 from fastapi import APIRouter, Depends, Query
 
+from gussetline import series
 from gussetline.api import security
 from gussetline.api.deps import get_unit
 from gussetline.api.schemas import MoneyOut, OfferOut, SectorOut, SeriesOut, TaxOut
@@ -73,7 +74,13 @@ def offer_out(offer: Offer, sightings: int = 1) -> OfferOut:
 
 @router.get("/series/{series_key}", response_model=SeriesOut)
 def read_series(series_key: str, work: UnitOfWork = Depends(get_unit)) -> SeriesOut:
-    """Every offer in one series, cheapest first."""
+    """Every offer in one series, cheapest first.
+
+    A key that is not a key is refused rather than looked up. Both answers
+    are empty, but a 404 tells a caller who fat fingered the departure that
+    the desk has nothing for that series, which is not what happened.
+    """
+    series.read(series_key)
     offers = work.observations.series(series_key)
     if not offers:
         raise NotFoundError("no observations in that series", series_key=series_key)

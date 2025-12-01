@@ -25,6 +25,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from enum import Enum
 
+from gussetline import series
 from gussetline.desk.ticket import Ticket
 from gussetline.errors import ValidationError
 from gussetline.flights import Cabin
@@ -95,7 +96,7 @@ class Watch:
 
     @property
     def series_key(self) -> str:
-        return f"{self.origin}-{self.destination}-{self.departure.isoformat()}-{self.cabin.value}"
+        return series.key(self.origin, self.destination, self.departure, self.cabin)
 
     @property
     def paid(self) -> Money:
@@ -195,7 +196,8 @@ def observation_from(offer: Offer, seen_on: date) -> Observation:
 
 
 def series_key_for(origin: str, destination: str, departure: date, cabin: Cabin) -> str:
-    return f"{city_of(origin)}-{city_of(destination)}-{departure.isoformat()}-{cabin.value}"
+    """The key a watch on this market would have. Kept as the name callers use."""
+    return series.key(origin, destination, departure, cabin)
 
 
 def total_dropped(watches: list[Watch], currency: str) -> Money:

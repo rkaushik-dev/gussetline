@@ -28,10 +28,12 @@ from gussetline.cli.desk import Desk, pass_desk
 from gussetline.collect.registry import default_registry
 from gussetline.collect.schedule import Market, Schedule
 from gussetline.desk import queue as worklist
+from gussetline.errors import NotFoundError
 from gussetline.persistence.book import open_book, raised_between
-from gussetline.persistence.models import WatchRow
+from gussetline.persistence.models import LoadRow, WatchRow
 from gussetline.persistence.unitofwork import UnitOfWork
 from gussetline.reports import coverage as coverage_report
+from gussetline.reports import filing as filing_report
 from gussetline.reports import reliability as reliability_report
 from gussetline.reports import savings as savings_report
 
@@ -99,6 +101,55 @@ def coverage(desk: Desk, today: datetime | None, runs: int, show: int) -> None:
     click.echo(coverage_report.render(built, limit=show))
     if built.gaps():
         raise SystemExit(1)
+
+
+@report.command("filing")
+@click.argument("carrier")
+@click.option("--against", type=int, default=None, help="Read against this load id.")
+@click.option("--show", type=int, default=15, help="How many of each list to print.")
+@pass_desk
+def filing(desk: Desk, carrier: str, against: int | None, show: int) -> None:
+    """What moved between a carrier's last two filings.
+
+    Exits one when something needs doing before the desk opens, which is a
+    fare that fell or a fare that stopped being filed. A tariff that only
+    grew is not news and should not page anybody.
+    """
+    with desk.database.unit() as work:
+        loads = work.tariff.loads_for(carrier)
+        if len(loads) < 2:
+            raise NotFoundError(
+                "a carrier needs two filings before they can be compared",
+                carrier=carrier.upper(),
+                filings=len(loads),
+            )
+        after = loads[0]
+        before = _pick(loads, against)
+        desk.say(f"{before.filename} to {after.filename}")
+        built = filing_report.build(
+            work.tariff.fares_in(before),
+            work.tariff.fares_in(after),
+            desk.settings.selling_currency,
+        )
+
+    click.echo(filing_report.render(built, limit=show))
+    if built.worth_a_look():
+        raise SystemExit(1)
+
+
+def _pick(loads: list[LoadRow], against: int | None) -> LoadRow:
+    """Which filing to read the newest one against.
+
+    The one before it by default, because that is the question somebody has
+    on the morning a file lands. A load id when somebody is reading a week of
+    filings back to one they trust.
+    """
+    if against is None:
+        return loads[1]
+    for row in loads:
+        if row.id == against:
+            return row
+    raise NotFoundError("no such filing for that carrier", load=against)
 
 
 def _schedule(work: UnitOfWork, when: date) -> Schedule:

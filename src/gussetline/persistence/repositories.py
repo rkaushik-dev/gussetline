@@ -176,6 +176,19 @@ class TariffRepository:
             ).all()
         )
 
+    def fares_in(self, load: LoadRow) -> list[FareRow]:
+        """Every fare one load filed, rows and not fares.
+
+        Rows, because the caller comparing two filings wants the fields the
+        tariff filed and not the priceable object we build out of them: a
+        change of rule number does not survive the trip through Fare.
+        """
+        return list(
+            self.session.scalars(
+                select(FareRow).where(FareRow.load_id == load.id).order_by(FareRow.fare_basis)
+            ).all()
+        )
+
     def retire(self, load: LoadRow) -> None:
         load.retired = True
 

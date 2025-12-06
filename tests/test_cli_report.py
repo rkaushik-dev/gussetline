@@ -11,7 +11,15 @@ from gussetline.collect.registry import Outcome
 from gussetline.collect.run import Result, RunReport
 from gussetline.collect.schedule import Market, Task
 from gussetline.config import Settings
-from gussetline.persistence.models import CouponRow, RecommendationRow, TicketRow, WatchRow
+from gussetline.errors import NotFoundError
+from gussetline.persistence.models import (
+    CouponRow,
+    FareRow,
+    LoadRow,
+    RecommendationRow,
+    TicketRow,
+    WatchRow,
+)
 from gussetline.persistence.unitofwork import Database
 
 TODAY = "2025-07-30"
@@ -340,3 +348,148 @@ def test_the_urgent_flag_narrows_the_list(runner, env):
         work.commit()
 
     assert "nothing open" in run(runner, "report", "queue", "--on", TODAY, "--urgent").output
+
+
+def a_filing(work, filename, loaded, amounts, carrier="LH", **over) -> LoadRow:
+    """One tariff file with a fare per amount it was given."""
+    load = LoadRow(
+        carrier=carrier,
+        filename=filename,
+        digest=filename.ljust(32, "0")[:32],
+        loaded_at=loaded,
+        effective_from=date(2025, 1, 1),
+        row_count=len(amounts),
+    )
+    work.session.add(load)
+    work.session.flush()
+    for basis, amount in amounts.items():
+        work.session.add(
+            FareRow(
+                load_id=load.id,
+                carrier=carrier,
+                origin="FRA",
+                destination="NYC",
+                fare_basis=basis,
+                amount=Decimal(amount),
+                currency="EUR",
+                owrt="2",
+                global_indicator="AT",
+                rule_number=over.get("rule_number", "0100"),
+                routing_number="0011",
+                tariff_number="1",
+                cabin="Y",
+                fare_type="published",
+                effective=date(2025, 1, 1),
+                discontinue=date(2025, 12, 31),
+                first_travel=date(2025, 1, 1),
+                last_travel=date(2025, 12, 31),
+            )
+        )
+    return load
+
+
+def two_filings(env, after, **over):
+    with database(env).unit() as work:
+        a_filing(work, "week01.dat", datetime(2025, 7, 1, 6, 0), {"KLWAP7RT": "420.00"})
+        a_filing(work, "week02.dat", datetime(2025, 7, 8, 6, 0), after, **over)
+        work.commit()
+
+
+def test_a_carrier_with_one_filing_cannot_be_compared(runner, env):
+    with database(env).unit() as work:
+        a_filing(work, "week01.dat", datetime(2025, 7, 1, 6, 0), {"KLWAP7RT": "420.00"})
+        work.commit()
+    reply = run(runner, "report", "filing", "LH")
+    assert reply.exit_code != 0
+    assert isinstance(reply.exception, NotFoundError)
+
+
+def test_a_carrier_nobody_has_filed_for_cannot_be_compared(runner, env):
+    assert run(runner, "report", "filing", "UA").exit_code != 0
+
+
+def test_a_filing_that_moved_a_price_reports_the_fall(runner, env):
+    two_filings(env, {"KLWAP7RT": "380.00"})
+    reply = run(runner, "report", "filing", "LH")
+    assert "reprice these" in reply.output
+    assert "420.00 EUR to 380.00 EUR" in reply.output
+
+
+def test_a_filing_with_a_fall_in_it_exits_one(runner, env):
+    two_filings(env, {"KLWAP7RT": "380.00"})
+    assert run(runner, "report", "filing", "LH").exit_code == 1
+
+
+def test_a_filing_that_only_grew_exits_zero(runner, env):
+    two_filings(env, {"KLWAP7RT": "420.00", "MLWAP7RT": "500.00"})
+    reply = run(runner, "report", "filing", "LH")
+    assert reply.exit_code == 0
+    assert "added      1" in reply.output
+
+
+def test_a_withdrawn_fare_exits_one_and_says_it_still_prices(runner, env):
+    two_filings(env, {"MLWAP7RT": "500.00"})
+    reply = run(runner, "report", "filing", "LH")
+    assert reply.exit_code == 1
+    assert "still price and should not" in reply.output
+
+
+def test_the_report_says_which_two_files_it_read(runner, env):
+    two_filings(env, {"KLWAP7RT": "420.00"})
+    assert "week01.dat to week02.dat" in run(runner, "report", "filing", "LH").output
+
+
+def test_the_newest_filing_is_the_one_read_against(runner, env):
+    # Three files in, and the question somebody has on the morning the third
+    # lands is about the third and the second.
+    with database(env).unit() as work:
+        a_filing(work, "week01.dat", datetime(2025, 7, 1, 6, 0), {"KLWAP7RT": "300.00"})
+        a_filing(work, "week02.dat", datetime(2025, 7, 8, 6, 0), {"KLWAP7RT": "420.00"})
+        a_filing(work, "week03.dat", datetime(2025, 7, 15, 6, 0), {"KLWAP7RT": "410.00"})
+        work.commit()
+    assert "week02.dat to week03.dat" in run(runner, "report", "filing", "LH").output
+
+
+def test_a_named_filing_is_read_against_instead(runner, env):
+    with database(env).unit() as work:
+        first = a_filing(work, "week01.dat", datetime(2025, 7, 1, 6, 0), {"KLWAP7RT": "300.00"})
+        a_filing(work, "week02.dat", datetime(2025, 7, 8, 6, 0), {"KLWAP7RT": "420.00"})
+        a_filing(work, "week03.dat", datetime(2025, 7, 15, 6, 0), {"KLWAP7RT": "410.00"})
+        work.commit()
+        against = first.id
+    reply = run(runner, "report", "filing", "LH", "--against", str(against))
+    assert "week01.dat to week03.dat" in reply.output
+    assert "300.00 EUR to 410.00 EUR" in reply.output
+
+
+def test_a_filing_id_that_is_not_this_carrier_is_a_not_found(runner, env):
+    two_filings(env, {"KLWAP7RT": "420.00"})
+    reply = run(runner, "report", "filing", "LH", "--against", "999")
+    assert isinstance(reply.exception, NotFoundError)
+
+
+def test_a_rule_change_at_the_same_price_is_reported_as_an_amendment(runner, env):
+    two_filings(env, {"KLWAP7RT": "420.00"}, rule_number="0200")
+    reply = run(runner, "report", "filing", "LH")
+    assert "same price, different terms" in reply.output
+    assert "rule number 0100 to 0200" in reply.output
+    assert reply.exit_code == 0
+
+
+def test_the_lists_stop_where_they_are_told_to(runner, env):
+    with database(env).unit() as work:
+        a_filing(
+            work,
+            "week01.dat",
+            datetime(2025, 7, 1, 6, 0),
+            {f"K{index:03d}": "100.00" for index in range(6)},
+        )
+        a_filing(
+            work,
+            "week02.dat",
+            datetime(2025, 7, 8, 6, 0),
+            {f"K{index:03d}": "90.00" for index in range(6)},
+        )
+        work.commit()
+    reply = run(runner, "report", "filing", "LH", "--show", "2")
+    assert "showing 2 of 6" in reply.output

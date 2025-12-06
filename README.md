@@ -31,6 +31,7 @@ refuses to run against a database that already holds anything.
 | `night` | reprice every live watch and raise what is worth raising |
 | `watch add` / `list` / `retire` | put a ticket on the desk, or take it off |
 | `report savings` / `reliability` / `coverage` / `queue` | read history, write nothing |
+| `report filing CARRIER` | what moved between a carrier's last two filings |
 | `prune` | drop what has aged out, dry by default |
 | `serve` / `issue-key` | run the service and issue the keys into it |
 

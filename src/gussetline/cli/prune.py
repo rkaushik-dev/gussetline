@@ -31,6 +31,7 @@ from gussetline.retention import Policy, Swept, default_policy
 @click.option("--run-days", type=int, default=None, help="Keep runs this long.")
 @click.option("--archive-days", type=int, default=None, help="Keep payloads this long.")
 @click.option("--apply", "applying", is_flag=True, help="Actually delete. Off by default.")
+@click.option("--scrub", "scrubbing", is_flag=True, help="Also check every stored payload.")
 @pass_desk
 def prune(
     desk: Desk,
@@ -39,6 +40,7 @@ def prune(
     run_days: int | None,
     archive_days: int | None,
     applying: bool,
+    scrubbing: bool,
 ) -> None:
     """Drop what has aged out. Says what it would do unless told to do it."""
     when = today.date() if today else date.today()
@@ -56,8 +58,35 @@ def prune(
         applied=applying,
     )
 
+    if scrubbing:
+        _scrub(desk, applying)
+
     if not applying:
         desk.say("nothing was deleted, pass --apply to do it")
+
+
+def _scrub(desk: Desk, applying: bool) -> None:
+    """Read every payload back and say which ones are not what they claim.
+
+    Not part of the ordinary sweep. It reads and decompresses the whole
+    store, which on a year of collecting is minutes rather than seconds, and
+    the answer is almost always none.
+
+    A corrupt blob is repaired by deleting it. That sounds backwards and is
+    not: the digest goes back to being one the desk does not hold, and the
+    next poll of that market fetches the payload again.
+    """
+    archive = Archive(desk.settings.archive_root)
+    if not applying:
+        bad = archive.verify()
+        desk.say(f"{len(bad)} payloads do not read back")
+        for digest in bad[:10]:
+            desk.warn(f"  {digest}")
+        return
+
+    corrupt, leftovers = archive.scrub()
+    desk.say(f"removed {corrupt} unreadable payloads and {leftovers} unfinished writes")
+    logs.event("prune.scrubbed", corrupt=corrupt, leftovers=leftovers)
 
 
 def _policy(observation_days: int | None, run_days: int | None, archive_days: int | None) -> Policy:

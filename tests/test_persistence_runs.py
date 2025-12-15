@@ -14,6 +14,8 @@ from gussetline.reports.reliability import build as reliability
 
 FRA_JFK = Market("FRA", "JFK")
 AUGUST = date(2025, 8, 24)
+STARTED = datetime(2025, 7, 20, 6, 0)
+FINISHED = datetime(2025, 7, 20, 6, 41)
 
 
 @pytest.fixture
@@ -205,3 +207,93 @@ def test_a_run_that_is_never_committed_is_not_there(database):
 
     with database.unit() as work:
         assert work.runs.count() == 0
+
+
+def test_a_run_can_be_opened_before_it_has_done_anything(database):
+    with database.unit() as work:
+        row = work.runs.open(STARTED)
+        work.commit()
+        identifier = row.id
+
+    with database.unit() as work:
+        found = work.runs.row(identifier)
+        assert found.started_at == STARTED
+        assert found.finished_at is None
+        assert found.tasks == 0
+
+
+def test_an_opened_run_is_there_after_the_process_that_opened_it_is_gone(database):
+    # The whole point. A machine that reboots at three leaves a row saying
+    # the desk started polling, which is what nothing recorded before.
+    with database.unit() as work:
+        work.runs.open(STARTED)
+        work.commit()
+
+    with database.unit() as work:
+        assert [row.started_at for row in work.runs.unfinished()] == [STARTED]
+
+
+def test_closing_a_run_fills_in_what_it_turned_out_to_be(database):
+    report = run(result(), result(Outcome.TRANSIENT, offers=0))
+    with database.unit() as work:
+        row = work.runs.open(STARTED)
+        work.runs.close(row, report, FINISHED)
+        work.commit()
+        identifier = row.id
+
+    with database.unit() as work:
+        found = work.runs.row(identifier)
+        assert found.finished_at == FINISHED
+        assert found.tasks == 2
+        assert found.calls == report.calls
+        assert len(found.results) == 2
+
+
+def test_a_closed_run_is_no_longer_unfinished(database):
+    with database.unit() as work:
+        row = work.runs.open(STARTED)
+        work.runs.close(row, run(result()), FINISHED)
+        work.commit()
+
+    with database.unit() as work:
+        assert work.runs.unfinished() == []
+
+
+def test_closing_a_run_twice_does_not_double_its_results(database):
+    report = run(result(), result())
+    with database.unit() as work:
+        row = work.runs.open(STARTED)
+        work.runs.close(row, report, FINISHED)
+        work.runs.close(row, report, FINISHED)
+        work.commit()
+        identifier = row.id
+
+    with database.unit() as work:
+        assert len(work.runs.row(identifier).results) == 2
+
+
+def test_the_unfinished_runs_come_back_newest_first(database):
+    with database.unit() as work:
+        work.runs.open(STARTED)
+        work.runs.open(FINISHED)
+        work.commit()
+
+    with database.unit() as work:
+        assert [row.started_at for row in work.runs.unfinished()] == [FINISHED, STARTED]
+
+
+def test_a_finished_run_and_an_open_one_are_told_apart(database):
+    with database.unit() as work:
+        done = work.runs.open(STARTED)
+        work.runs.close(done, run(result()), FINISHED)
+        work.runs.open(FINISHED)
+        work.commit()
+
+    with database.unit() as work:
+        assert len(work.runs.unfinished()) == 1
+        assert work.runs.count() == 2
+
+
+def test_a_run_that_was_never_opened_is_not_found(database):
+    with database.unit() as work, pytest.raises(NotFoundError):
+        work.runs.row(999)

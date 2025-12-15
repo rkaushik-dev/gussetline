@@ -106,6 +106,13 @@ def run_it(
         return
 
     with desk.database.unit() as work:
+        # Written and committed before a single call goes out. A night run is
+        # hours long, and a row written only at the end means a machine that
+        # reboots at three leaves no trace that the desk polled anything.
+        identifier = work.runs.open(rig.now()).id
+        work.commit()
+
+    with desk.database.unit() as work:
         kept = _keeper(work)
         report = pool.run(
             rig.collector(),
@@ -117,9 +124,8 @@ def run_it(
             kept.sink,
             workers=workers,
         )
-        row = work.runs.record(report, finished=rig.now())
+        work.runs.close(work.runs.row(identifier), report, rig.now())
         work.commit()
-        identifier = row.id
 
     _report(desk, report, rig)
     logs.event(

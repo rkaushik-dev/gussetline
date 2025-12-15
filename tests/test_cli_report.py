@@ -493,3 +493,35 @@ def test_the_lists_stop_where_they_are_told_to(runner, env):
         work.commit()
     reply = run(runner, "report", "filing", "LH", "--show", "2")
     assert "showing 2 of 6" in reply.output
+
+
+def test_reliability_says_when_a_run_never_finished(runner, env):
+    # Nothing else in the report can see it. Every supplier above is graded
+    # on the calls that did come back.
+    with database(env).unit() as work:
+        work.runs.open(datetime(2025, 7, 29, 22, 0))
+        work.commit()
+
+    reply = run(runner, "report", "reliability")
+    assert "never finished" in reply.output
+    assert reply.exit_code == 1
+
+
+def test_reliability_counts_the_runs_that_never_finished(runner, env):
+    with database(env).unit() as work:
+        for hour in range(3):
+            work.runs.open(datetime(2025, 7, 29, 20 + hour, 0))
+        work.commit()
+
+    assert "3 runs started and never finished" in run(runner, "report", "reliability").output
+
+
+def test_reliability_says_nothing_about_finished_runs(runner, env):
+    with database(env).unit() as work:
+        row = work.runs.open(datetime(2025, 7, 29, 22, 0))
+        work.runs.close(
+            row, RunReport(started=datetime(2025, 7, 29, 22, 0)), datetime(2025, 7, 29, 23, 0)
+        )
+        work.commit()
+
+    assert "never finished" not in run(runner, "report", "reliability").output

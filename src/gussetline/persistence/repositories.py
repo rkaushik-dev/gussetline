@@ -30,6 +30,7 @@ from gussetline.persistence.mappers import (
     combinability_to_row,
     fare_to_row,
     offer_to_row,
+    result_to_row,
     row_to_airport,
     row_to_carrier,
     row_to_combinability,
@@ -400,11 +401,62 @@ class RunRepository:
         self.session.flush()
         return row
 
+    def open(self, started: datetime) -> RunRow:
+        """Write down that a run has begun, before it has done anything.
+
+        Committed by the caller straight away, on purpose. A night run is
+        hours long, and a row written only at the end means a machine that
+        reboots at three leaves no trace that the desk polled anything at
+        all. The morning check then reads a desk that has not collected since
+        yesterday and cannot tell that from one that tried and died.
+        """
+        row = RunRow(started_at=started)
+        self.session.add(row)
+        self.session.flush()
+        return row
+
+    def close(self, row: RunRow, report: RunReport, finished: datetime) -> RunRow:
+        """Fill in what a run turned out to be, and stamp it finished.
+
+        The results arrive here rather than as they happen. They are cheap to
+        hold and expensive to write one at a time, and a run that dies has
+        already lost the thing worth keeping, which is the offers.
+        """
+        row.finished_at = finished
+        row.tasks = len(report.results)
+        row.calls = report.calls
+        row.offers = report.offers
+        row.skipped_breaker = report.skipped_breaker
+        row.skipped_budget = report.skipped_budget
+        row.results = [result_to_row(result) for result in report.results]
+        self.session.flush()
+        return row
+
+    def unfinished(self, limit: int = 30) -> list[RunRow]:
+        """Runs that started and never said they were done, newest first.
+
+        Rows rather than reports, because the reading anybody wants from one
+        of these is when it started, and a report built from a run with no
+        results in it says nothing.
+        """
+        return list(
+            self.session.scalars(
+                select(RunRow)
+                .where(RunRow.finished_at.is_(None))
+                .order_by(RunRow.started_at.desc())
+                .limit(limit)
+            ).all()
+        )
+
     def get(self, identifier: int) -> RunReport:
+        return row_to_run(self.row(identifier))
+
+    def row(self, identifier: int) -> RunRow:
+        """The row itself, for the caller that is going to write to it."""
         row = self.session.get(RunRow, identifier)
         if row is None:
             raise NotFoundError("no such run", run=identifier)
-        return row_to_run(row)
+        return row
 
     def recent(self, limit: int = 30) -> list[RunReport]:
         """The newest runs first, which is the order every report wants."""

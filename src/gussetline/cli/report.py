@@ -77,10 +77,20 @@ def reliability(desk: Desk, since: datetime | None, runs: int | None) -> None:
         else:
             first = since if since else datetime.now() - timedelta(days=RELIABILITY_DAYS)
             history = work.runs.since(first)
+        stalled = [row.started_at for row in work.runs.unfinished()]
 
     built = reliability_report.build(history)
     click.echo(reliability_report.render(built))
-    if built.needing_a_human():
+
+    # A run that started and never said it was done took its offers with it.
+    # Nothing else here can see that: every supplier in the report above is
+    # graded on the calls that did come back.
+    for started in stalled[:5]:
+        desk.warn(f"run of {started:%Y-%m-%d %H:%M} never finished")
+    if stalled:
+        desk.warn(f"{len(stalled)} runs started and never finished")
+
+    if built.needing_a_human() or stalled:
         raise SystemExit(1)
 
 

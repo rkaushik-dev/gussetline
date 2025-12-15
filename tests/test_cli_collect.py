@@ -7,6 +7,7 @@ import pytest
 from click.testing import CliRunner
 
 from gussetline.cli.main import cli
+from gussetline.collect import pool
 from gussetline.collect.archive import Archive
 from gussetline.config import Settings
 from gussetline.persistence.models import TicketRow, WatchRow
@@ -14,6 +15,11 @@ from gussetline.persistence.unitofwork import Database
 
 TODAY = "2025-07-21"
 AUGUST = date(2025, 8, 24)
+
+
+def _dies(*args, **kwargs):
+    """A run that goes down partway through, the way a reboot does."""
+    raise OSError("the machine went down")
 
 
 @pytest.fixture
@@ -233,3 +239,52 @@ def test_the_cost_of_a_run_is_printed(runner, env, url, home):
     )
     reply = runner.invoke(cli, ["collect", "replay", "--on", TODAY])
     assert "cost 0" in reply.output
+
+
+def test_a_run_is_written_down_before_any_call_goes_out(runner, env, url, monkeypatch):
+    # A night run is hours long. A row written only at the end means a
+    # machine that reboots at three leaves no trace that the desk polled
+    # anything at all, and the morning check cannot tell that from a desk
+    # that never started.
+    make_watch(url)
+    monkeypatch.setattr(pool, "run", _dies)
+
+    reply = runner.invoke(cli, ["collect", "run", "--on", TODAY])
+    assert reply.exit_code != 0
+
+    database = Database(Settings(database_url=url))
+    with database.unit() as work:
+        assert work.runs.count() == 1
+        assert len(work.runs.unfinished()) == 1
+
+
+def test_a_run_that_died_is_left_open_rather_than_looking_healthy(runner, env, url, monkeypatch):
+    make_watch(url)
+    monkeypatch.setattr(pool, "run", _dies)
+    runner.invoke(cli, ["collect", "run", "--on", TODAY])
+
+    database = Database(Settings(database_url=url))
+    with database.unit() as work:
+        assert work.runs.unfinished()[0].finished_at is None
+
+
+def test_a_run_that_finished_is_closed_and_carries_its_results(runner, env, url):
+    make_watch(url)
+    reply = runner.invoke(cli, ["collect", "run", "--on", TODAY])
+    assert reply.exit_code == 0
+
+    database = Database(Settings(database_url=url))
+    with database.unit() as work:
+        assert work.runs.unfinished() == []
+        assert work.runs.count() == 1
+        assert work.runs.recent(limit=1)[0].results
+
+
+def test_a_run_that_finished_keeps_the_id_it_was_given_at_the_start(runner, env, url):
+    make_watch(url)
+    reply = runner.invoke(cli, ["collect", "run", "--on", TODAY])
+    identifier = reply.output.strip().splitlines()[-1].split()[-1]
+
+    database = Database(Settings(database_url=url))
+    with database.unit() as work:
+        assert work.runs.row(int(identifier)).finished_at is not None

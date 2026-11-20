@@ -11,3 +11,12 @@ dist/
 .venv/
 *.sqlite3
 var/
+
+# Java
+target/
+.gradle/
+.idea/
+*.iml
+out/
+*.mv.db
+*.trace.db

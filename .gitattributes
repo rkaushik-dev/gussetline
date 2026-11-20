@@ -1,4 +1,7 @@
-* text=auto eol=lf
+* text=auto
+mvnw text eol=lf
+*.cmd text eol=crlf
+*.bat text eol=crlf
 *.py text eol=lf
 *.toml text eol=lf
 *.yml text eol=lf

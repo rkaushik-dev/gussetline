@@ -37,6 +37,20 @@ public final class Numbers {
     }
 
     /**
+     * The total of some decimals, counted up from a whole zero with each addition at {@link
+     * #CONTEXT}. Nothing totals {@code 0}; otherwise the total keeps the widest scale it met, so
+     * {@code 20.00} and {@code 10.00} total {@code 30.00}, unless twenty-eight digits cannot hold
+     * it.
+     */
+    public static BigDecimal sum(Iterable<BigDecimal> values) {
+        BigDecimal total = BigDecimal.ZERO;
+        for (BigDecimal value : values) {
+            total = total.add(value, CONTEXT);
+        }
+        return total;
+    }
+
+    /**
      * A whole number written in decimal digits, with an optional sign.
      *
      * @throws NumberFormatException when the text is anything else, or does not fit an {@code int}

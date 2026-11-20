@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.math.BigDecimal;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
@@ -19,6 +20,24 @@ class NumbersTest {
                 .isEqualTo("0.6666666666666666666666666667");
         assertThat(Numbers.divide(new BigDecimal("840.00"), new BigDecimal("2")).toString())
                 .isEqualTo("420.00");
+    }
+
+    @ParameterizedTest
+    @CsvSource(
+            delimiter = '|',
+            value = {
+                "''                                       | 0",
+                "20.00 10.00                              | 30.00",
+                "0.1 0.25                                 | 0.35",
+                "-20.00 20.00                             | 0.00",
+                "1E+28 1                                  | 1.000000000000000000000000000E+28",
+                "9999999999999999999999999999 0.5         | 1.000000000000000000000000000E+28",
+                "9999999999999999999999999998 0.5         | 9999999999999999999999999998"
+            })
+    void aSumCountsUpFromAWholeZeroAtTwentyEightDigits(String values, String total) {
+        List<BigDecimal> terms =
+                Text.words(values).stream().map(BigDecimal::new).toList();
+        assertThat(Numbers.sum(terms).toString()).isEqualTo(total);
     }
 
     @Test

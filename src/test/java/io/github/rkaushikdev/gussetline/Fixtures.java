@@ -1,10 +1,18 @@
 package io.github.rkaushikdev.gussetline;
 
 import io.github.rkaushikdev.gussetline.distance.MileageTable;
+import io.github.rkaushikdev.gussetline.exchange.Converter;
+import io.github.rkaushikdev.gussetline.exchange.RateTable;
 import io.github.rkaushikdev.gussetline.flights.Cabin;
 import io.github.rkaushikdev.gussetline.flights.Segment;
+import io.github.rkaushikdev.gussetline.indicators.GlobalIndicator;
 import io.github.rkaushikdev.gussetline.itinerary.Itinerary;
 import io.github.rkaushikdev.gussetline.itinerary.SurfaceSector;
+import io.github.rkaushikdev.gussetline.money.Money;
+import io.github.rkaushikdev.gussetline.routing.RoutingMap;
+import io.github.rkaushikdev.gussetline.tariff.Fare;
+import io.github.rkaushikdev.gussetline.tariff.OwRt;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.time.format.ResolverStyle;
@@ -113,6 +121,72 @@ public final class Fixtures {
         return new Itinerary(List.of(
                 segment("LH", "992", "FRA", "LHR", "2025-03-04 07:00", "2025-03-04 07:40"),
                 segment("LH", "400", "LHR", "JFK", "2025-03-06 11:05", "2025-03-06 14:00")));
+    }
+
+    // Fares
+
+    /**
+     * A published fare with the fields nine tests out of ten do not care about: LH, Frankfurt to New
+     * York, 420.00 EUR filed as half of a round trip under KLWAP7RT, AT, rule 1100, routed on
+     * mileage.
+     *
+     * <p>Every one of those tests had its own copy of this and they had drifted: two of them
+     * defaulted the routing to 0001, which is a real routing number that no test filed a map for, so
+     * those tests were passing through the unknown map fallback rather than through the mileage path
+     * they said they were testing.
+     *
+     * <p>Anything else a test cares about goes on through the fare's {@code with} methods: {@code
+     * fare().withRuleNumber("2200")}, {@code fare("FRA", "JFK", "380.00").withFareBasis("QRT")}, or
+     * {@code fare().withAmount(Money.of("12.999", "KWD"))} for another currency. Change the two ends
+     * through the positional form rather than one {@code with} at a time, since a fare between a city
+     * and itself is refused on the way.
+     */
+    public static Fare fare() {
+        return fare("FRA", "JFK");
+    }
+
+    /** {@link #fare()} between two other points. */
+    public static Fare fare(String origin, String destination) {
+        return fare(origin, destination, "420.00");
+    }
+
+    /** {@link #fare()} between two other points, at another amount in euro. */
+    public static Fare fare(String origin, String destination, String amount) {
+        return Fare.builder()
+                .carrier("LH")
+                .origin(origin)
+                .destination(destination)
+                .fareBasis("KLWAP7RT")
+                .amount(Money.of(amount, "EUR"))
+                .owrt(OwRt.ROUND_TRIP_HALF)
+                .globalIndicator(GlobalIndicator.AT)
+                .ruleNumber("1100")
+                .routingNumber(RoutingMap.MILEAGE_ROUTING)
+                .build();
+    }
+
+    /** The same thing as {@link #fare()} filed so it can stand on its own. */
+    public static Fare oneWayFare() {
+        return oneWayFare("FRA", "JFK");
+    }
+
+    /** {@link #oneWayFare()} between two other points. */
+    public static Fare oneWayFare(String origin, String destination) {
+        return oneWayFare(origin, destination, "420.00");
+    }
+
+    /** {@link #oneWayFare()} between two other points, at another amount in euro. */
+    public static Fare oneWayFare(String origin, String destination, String amount) {
+        return fare(origin, destination, amount).withOwrt(OwRt.ONE_WAY_ONLY);
+    }
+
+    /** Every currency at one to one, so a test can read the arithmetic. */
+    public static Converter flatConverter() {
+        RateTable table = new RateTable("roe");
+        for (String code : List.of("EUR", "USD", "GBP", "JPY", "CHF")) {
+            table.add(code, LocalDate.of(2025, 1, 1), "1.000");
+        }
+        return new Converter(table);
     }
 
     // Mileage

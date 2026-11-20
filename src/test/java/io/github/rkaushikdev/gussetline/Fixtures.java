@@ -1,5 +1,7 @@
 package io.github.rkaushikdev.gussetline;
 
+import io.github.rkaushikdev.gussetline.combinability.Combinability;
+import io.github.rkaushikdev.gussetline.combinability.CombinabilityStore;
 import io.github.rkaushikdev.gussetline.distance.MileageTable;
 import io.github.rkaushikdev.gussetline.exchange.Converter;
 import io.github.rkaushikdev.gussetline.exchange.RateTable;
@@ -187,6 +189,39 @@ public final class Fixtures {
             table.add(code, LocalDate.of(2025, 1, 1), "1.000");
         }
         return new Converter(table);
+    }
+
+    // Combinability
+
+    /**
+     * A record for LH KLWAP7RT that permits every journey shape and end on end with any carrier, for
+     * tests not about combinability.
+     */
+    public static Combinability combinable() {
+        return combinable("KLWAP7RT");
+    }
+
+    /** {@link #combinable()} for another LH fare basis. */
+    public static Combinability combinable(String basis) {
+        return combinable(basis, "LH");
+    }
+
+    /** {@link #combinable()} for another fare basis and carrier. */
+    public static Combinability combinable(String basis, String carrier) {
+        return Combinability.builder(carrier, basis)
+                .roundTrip(true)
+                .circleTrip(true)
+                .openJaw(true)
+                .endOnEnd(true)
+                .sameCarrierOnly(false)
+                .build();
+    }
+
+    /** A store holding {@link #combinable()} alone. */
+    public static CombinabilityStore permissiveCombinability() {
+        CombinabilityStore store = new CombinabilityStore();
+        store.add(combinable());
+        return store;
     }
 
     // Mileage

@@ -131,6 +131,8 @@ class CollectBreakerTest {
         b.allow();
         b.failed();
         assertThat(b.isOpen()).isTrue();
+        // The probe reopened it by itself rather than by adding to the run.
+        assertThat(b.failures()).isEqualTo(5);
     }
 
     @Test

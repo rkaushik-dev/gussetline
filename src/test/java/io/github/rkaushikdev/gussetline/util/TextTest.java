@@ -45,6 +45,24 @@ class TextTest {
     }
 
     @Test
+    void linesSplitOnEveryBreakAndKeepEmptyLinesInside() {
+        assertThat(Text.lines("H1\nF1\r\nF2\rF3")).containsExactly("H1", "F1", "F2", "F3");
+        assertThat(Text.lines("a\n\nb")).containsExactly("a", "", "b");
+        assertThat(Text.lines("a\u000Bb\u000Cc\u001Cd\u001De\u001Ef\u0085g h i"))
+                .containsExactly("a", "b", "c", "d", "e", "f", "g", "h", "i");
+        assertThat(Text.lines("a\tb c")).containsExactly("a\tb c");
+    }
+
+    @Test
+    void linesDropOnlyTheEmptyLineAfterAFinalBreak() {
+        assertThat(Text.lines("a\n")).containsExactly("a");
+        assertThat(Text.lines("a\r\n")).containsExactly("a");
+        assertThat(Text.lines("\n")).containsExactly("");
+        assertThat(Text.lines("a\n\n")).containsExactly("a", "");
+        assertThat(Text.lines("")).isEmpty();
+    }
+
+    @Test
     void characterClassesNeedAtLeastOneCharacter() {
         assertThat(Text.isDigits("0400")).isTrue();
         assertThat(Text.isDigits("")).isFalse();

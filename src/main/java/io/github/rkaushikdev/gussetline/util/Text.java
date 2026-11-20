@@ -87,6 +87,42 @@ public final class Text {
         return List.copyOf(words);
     }
 
+    /**
+     * The lines of a text, without their line breaks, and with no empty line after a final break.
+     *
+     * <p>A line ends at a line feed, a carriage return, the pair of the two, or any of the other
+     * breaks Unicode and the old record formats use: vertical tab, form feed, the file, group and
+     * record separators (U+001C to U+001E), NEXT LINE (U+0085) and the line and paragraph separators
+     * (U+2028, U+2029). {@link String#lines()} knows only the first three.
+     */
+    public static List<String> lines(String text) {
+        List<String> lines = new ArrayList<>();
+        int start = 0;
+        int index = 0;
+        while (index < text.length()) {
+            char character = text.charAt(index);
+            if (!isLineBreak(character)) {
+                index++;
+                continue;
+            }
+            lines.add(text.substring(start, index));
+            boolean pair = character == '\r' && index + 1 < text.length() && text.charAt(index + 1) == '\n';
+            index += pair ? 2 : 1;
+            start = index;
+        }
+        if (start < text.length()) {
+            lines.add(text.substring(start));
+        }
+        return List.copyOf(lines);
+    }
+
+    private static boolean isLineBreak(char character) {
+        return switch (character) {
+            case '\n', '\r', '\u000B', '\u000C', '\u001C', '\u001D', '\u001E', '\u0085', ' ', ' ' -> true;
+            default -> false;
+        };
+    }
+
     /** Whether the text is non-empty and every character in it is a decimal digit. */
     public static boolean isDigits(String text) {
         return !text.isEmpty() && text.chars().allMatch(Character::isDigit);

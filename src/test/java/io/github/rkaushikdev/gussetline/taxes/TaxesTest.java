@@ -43,6 +43,16 @@ class TaxesTest {
     }
 
     @Test
+    void twoRulesAreEqualWhenTheirAmountsAreTheSameNumber() {
+        TaxRule written = rule().amount("10.0").build();
+        assertThat(written).isEqualTo(rule().amount("10.00").build());
+        assertThat(written).hasSameHashCodeAs(rule().amount("10.00").build());
+        assertThat(written).isNotEqualTo(rule().amount("10.01").build());
+        assertThat(written)
+                .isNotEqualTo(rule().amount("10.0").exemptTransit(true).build());
+    }
+
+    @Test
     void yqAndYrAreMarkedAsCarrierMoney() {
         assertThat(rule().code("YQ").country("ZZ").build().isCarrierImposed()).isTrue();
         assertThat(rule().code("YR").country("ZZ").build().isCarrierImposed()).isTrue();

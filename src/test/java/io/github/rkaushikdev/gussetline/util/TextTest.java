@@ -63,6 +63,23 @@ class TextTest {
     }
 
     @Test
+    void aSliceCountsCodePointsAndStopsAtTheEnd() {
+        assertThat(Text.slice("F1KLWAP7RT  EUR", 2, 12)).isEqualTo("KLWAP7RT  ");
+        assertThat(Text.slice("F1KL", 2, 10)).isEqualTo("KL");
+        assertThat(Text.slice("F1", 5, 9)).isEmpty();
+        assertThat(Text.slice("T1😀AB", 2, 4)).isEqualTo("😀A");
+        assertThat(Text.length("T1😀AB")).isEqualTo(5);
+    }
+
+    @Test
+    void aSliceCountsANegativePositionBackFromTheEnd() {
+        assertThat(Text.slice("F1KL", -2, 4)).isEqualTo("KL");
+        assertThat(Text.slice("F1KL", 0, -1)).isEqualTo("F1K");
+        assertThat(Text.slice("F1KL", -9, 2)).isEqualTo("F1");
+        assertThat(Text.slice("F1KL", 3, 1)).isEmpty();
+    }
+
+    @Test
     void characterClassesNeedAtLeastOneCharacter() {
         assertThat(Text.isDigits("0400")).isTrue();
         assertThat(Text.isDigits("")).isFalse();

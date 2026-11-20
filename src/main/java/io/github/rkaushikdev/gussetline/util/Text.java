@@ -116,6 +116,34 @@ public final class Text {
         return List.copyOf(lines);
     }
 
+    /**
+     * The characters from {@code start} up to but not including {@code end}, counted in code points
+     * so that a character outside the Basic Multilingual Plane is one position, not two.
+     *
+     * <p>Positions past the end are taken as the end, a negative position counts back from the end,
+     * and a range that ends before it starts is empty, so a slice never throws: {@code slice("F1KL",
+     * 2, 10)} is {@code "KL"} and {@code slice("F1KL", -2, 4)} is {@code "KL"}.
+     */
+    public static String slice(String text, int start, int end) {
+        int length = text.codePointCount(0, text.length());
+        int from = bound(start, length);
+        int to = bound(end, length);
+        if (to <= from) {
+            return "";
+        }
+        int begin = text.offsetByCodePoints(0, from);
+        return text.substring(begin, text.offsetByCodePoints(begin, to - from));
+    }
+
+    /** How many characters a text holds, counted in code points. */
+    public static int length(String text) {
+        return text.codePointCount(0, text.length());
+    }
+
+    private static int bound(int position, int length) {
+        return position < 0 ? Math.max(0, position + length) : Math.min(position, length);
+    }
+
     private static boolean isLineBreak(char character) {
         return switch (character) {
             case '\n', '\r', '\u000B', '\u000C', '\u001C', '\u001D', '\u001E', '\u0085', ' ', ' ' -> true;

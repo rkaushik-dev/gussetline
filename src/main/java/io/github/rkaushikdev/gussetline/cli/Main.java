@@ -48,6 +48,7 @@ import picocli.CommandLine.ParseResult;
         version = "gussetline, version " + Gussetline.VERSION,
         description = "Fare audit and reprice desk.",
         subcommands = {
+            AuditCommand.class,
             Main.CheckDesk.class,
             CollectCommands.Collect.class,
             Main.CreateSchema.class,

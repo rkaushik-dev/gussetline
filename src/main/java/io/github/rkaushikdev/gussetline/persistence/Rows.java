@@ -6,8 +6,11 @@ import jakarta.persistence.TypedQuery;
 import java.util.List;
 import java.util.Optional;
 
-/** The few ways a repository reads a query's rows, written once. */
-final class Rows {
+/**
+ * The few ways a query's rows are read, written once for the repositories and for anybody else who
+ * reads through a unit's session.
+ */
+public final class Rows {
 
     private Rows() {}
 
@@ -16,7 +19,7 @@ final class Rows {
      *
      * @throws NonUniqueResultException when it finds more than one
      */
-    static <T> Optional<T> oneOrNone(TypedQuery<T> query) {
+    public static <T> Optional<T> oneOrNone(TypedQuery<T> query) {
         List<T> found = query.getResultList();
         if (found.size() > 1) {
             throw new NonUniqueResultException("expected at most one row, found " + found.size());
@@ -25,7 +28,7 @@ final class Rows {
     }
 
     /** The first row a query finds in its own order, or nothing when it finds none. */
-    static <T> Optional<T> first(TypedQuery<T> query) {
+    public static <T> Optional<T> first(TypedQuery<T> query) {
         return query.setMaxResults(1).getResultList().stream().findFirst();
     }
 

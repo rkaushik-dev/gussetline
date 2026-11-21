@@ -61,6 +61,7 @@ import picocli.CommandLine.ParseResult;
             SeedCommand.class,
             ServeCommands.Serve.class,
             Main.ShowSettings.class,
+            WatchCommands.Watching.class,
         })
 public final class Main {
 

@@ -212,8 +212,11 @@ public final class Gds {
         }
     }
 
-    /** The cabin a letter names, or economy for a letter the tariff does not price. */
-    private static Cabin cabinOf(String letter) {
+    /**
+     * The cabin a letter names, or economy for a letter the tariff does not price. Every supplier
+     * reader falls back the same way.
+     */
+    static Cabin cabinOf(String letter) {
         return Arrays.stream(Cabin.values())
                 .filter(cabin -> cabin.value().equals(letter))
                 .findFirst()

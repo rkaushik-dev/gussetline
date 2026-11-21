@@ -3,6 +3,9 @@ package io.github.rkaushikdev.gussetline.combinability;
 import static io.github.rkaushikdev.gussetline.Fixtures.fare;
 import static io.github.rkaushikdev.gussetline.Fixtures.flatConverter;
 import static io.github.rkaushikdev.gussetline.Fixtures.segment;
+import static io.github.rkaushikdev.gussetline.construction.Construction.assembleOneWay;
+import static io.github.rkaushikdev.gussetline.construction.Construction.assembleRoundTrip;
+import static io.github.rkaushikdev.gussetline.construction.Construction.priceComponent;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -25,23 +28,6 @@ class CombinabilityTest {
     private static final LocalDate TICKETING = LocalDate.of(2025, 2, 14);
 
     private final Converter flatConverter = flatConverter();
-
-    /**
-     * A component priced with a fare at its neutral amount on the ticketing date, which is all the
-     * pricing these checks need.
-     */
-    private static FareComponent priceComponent(
-            FareComponent component, Fare fare, Converter converter, LocalDate ticketing) {
-        return component.pricedWith(fare, converter.toNuc(fare.amount(), ticketing));
-    }
-
-    private static PricingUnit assembleOneWay(FareComponent component) {
-        return new PricingUnit(List.of(component), JourneyType.ONE_WAY);
-    }
-
-    private static PricingUnit assembleRoundTrip(FareComponent outbound, FareComponent inbound) {
-        return new PricingUnit(List.of(outbound, inbound), JourneyType.ROUND_TRIP);
-    }
 
     private FareComponent out() {
         return out(UnaryOperator.identity());

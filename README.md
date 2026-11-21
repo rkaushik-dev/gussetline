@@ -1,5 +1,11 @@
 # gussetline
 
+[![CI](https://github.com/rkaushik-dev/gussetline/actions/workflows/ci.yml/badge.svg)](https://github.com/rkaushik-dev/gussetline/actions/workflows/ci.yml)
+![Java 21](https://img.shields.io/badge/Java-21-007396)
+![Spring Boot 3.5](https://img.shields.io/badge/Spring%20Boot-3.5-6DB33F)
+![Maven](https://img.shields.io/badge/build-Maven-C71A36)
+![JUnit 5](https://img.shields.io/badge/tests-JUnit%205-25A162)
+
 Fare audit and reprice desk for a small airfare consolidator.
 
 Supplier feeds are polled on a politeness budget, their payloads archived raw

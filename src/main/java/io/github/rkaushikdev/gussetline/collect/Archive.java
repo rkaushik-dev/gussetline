@@ -460,7 +460,7 @@ public final class Archive {
      *
      * @throws ValidationError when the digest is too short to be one
      */
-    Path pathFor(String digest) {
+    public Path pathFor(String digest) {
         if (Text.length(digest) < 4) {
             throw new ValidationError("not a digest", Details.of("digest", digest));
         }

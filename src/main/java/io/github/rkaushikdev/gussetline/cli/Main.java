@@ -55,6 +55,7 @@ import picocli.CommandLine.ParseResult;
             LoadCommands.Load.class,
             NightCommand.class,
             PriceCommand.class,
+            PruneCommand.class,
             ReportCommands.Report.class,
             SeedCommand.class,
             Main.ShowSettings.class,

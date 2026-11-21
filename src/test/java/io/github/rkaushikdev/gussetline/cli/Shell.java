@@ -18,13 +18,16 @@ import java.util.Optional;
  *
  * <p>A failure that escapes the command line ends a real process with status one once the runtime
  * has printed it, so a run that throws comes back here as code one with the failure beside it.
+ *
+ * <p>Public so the tests of a package whose behaviour the command line drives, such as retention, can
+ * run it the same way.
  */
-final class Shell {
+public final class Shell {
 
     private final Map<String, String> environment;
     private final Wiring wiring;
 
-    Shell() {
+    public Shell() {
         this(Map.of(), Wiring.standard());
     }
 
@@ -34,7 +37,7 @@ final class Shell {
     }
 
     /** The same shell with one more variable exported, replacing any value it had. */
-    Shell exporting(String name, String value) {
+    public Shell exporting(String name, String value) {
         Map<String, String> more = new LinkedHashMap<>(environment);
         more.put(name, value);
         return new Shell(more, wiring);
@@ -46,7 +49,7 @@ final class Shell {
     }
 
     /** Run one command line. */
-    Result run(String... args) {
+    public Result run(String... args) {
         StringWriter out = new StringWriter();
         StringWriter err = new StringWriter();
         StringWriter both = new StringWriter();
@@ -64,17 +67,17 @@ final class Shell {
     }
 
     /** A file database under {@code directory}, named {@code desk}. */
-    static String fileUrl(Path directory) {
+    public static String fileUrl(Path directory) {
         return "jdbc:h2:file:" + directory.resolve("desk");
     }
 
     /** The database at {@code url}, made the way the command line makes it. The caller closes it. */
-    static Database database(String url) {
+    public static Database database(String url) {
         return new Database(new Settings().withDatabase(url));
     }
 
     /** Build the schema in the database at {@code url}. */
-    static void createSchema(String url) {
+    public static void createSchema(String url) {
         try (Database database = database(url)) {
             database.createSchema();
         }
@@ -89,7 +92,7 @@ final class Shell {
      * @param output both streams together, the way a terminal shows them
      * @param failure the refusal the code was chosen for, or the failure that escaped
      */
-    record Result(int code, String out, String err, String output, Optional<RuntimeException> failure) {}
+    public record Result(int code, String out, String err, String output, Optional<RuntimeException> failure) {}
 
     /** A writer that writes everything to two others. Closing it leaves both open to be read. */
     private static final class Both extends Writer {

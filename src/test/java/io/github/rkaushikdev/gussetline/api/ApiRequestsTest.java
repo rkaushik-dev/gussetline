@@ -144,6 +144,59 @@ class ApiRequestsTest {
     }
 
     @Test
+    void aLimitBelowTheLeastIsRefusedWithTheValueAsSent() {
+        Http.Answer reply = client.get("/queue", "limit", "0");
+        assertThat(onlyProblem(reply))
+                .isEqualTo(problem(
+                        "greater_than_equal",
+                        List.of("query", "limit"),
+                        "Input should be greater than or equal to 1",
+                        "0",
+                        Map.of("ge", 1)));
+    }
+
+    @Test
+    void aRecommendationNumberThatIsNoNumberIsRefused() {
+        Http.Answer reply = client.get("/watches/recommendations/abc");
+        assertThat(onlyProblem(reply))
+                .isEqualTo(problem(
+                        "int_parsing",
+                        List.of("path", "identifier"),
+                        "Input should be a valid integer, unable to parse string as an integer",
+                        "abc"));
+    }
+
+    @Test
+    void aDecisionWithAnEmptyNameIsRefusedWithItsLimit() {
+        Http.Answer reply = client.post("/watches/recommendations/1/take", Map.of("by", ""));
+        assertThat(onlyProblem(reply))
+                .isEqualTo(problem(
+                        "string_too_short",
+                        List.of("body", "by"),
+                        "String should have at least 1 character",
+                        "",
+                        Map.of("min_length", 1)));
+    }
+
+    @Test
+    void aDecisionWithNoBodyIsMissing() {
+        Http.Answer reply = client.postText("/watches/recommendations/1/take", "application/json", "");
+        assertThat(onlyProblem(reply)).isEqualTo(problem("missing", List.of("body"), "Field required", null));
+    }
+
+    @Test
+    void aDecisionThatIsNotJsonIsRefusedWhereTheReadingStopped() {
+        Http.Answer reply = client.postText("/watches/recommendations/1/take", "application/json", "{\"by\": }");
+        assertThat(onlyProblem(reply))
+                .isEqualTo(problem(
+                        "json_invalid",
+                        List.of("body", 7),
+                        "JSON decode error",
+                        Map.of(),
+                        Map.of("error", "Expecting value")));
+    }
+
+    @Test
     void aPathNothingAnswersIsNotFound() {
         Http.Answer reply = client.get("/nowhere");
         assertThat(reply.status()).isEqualTo(404);

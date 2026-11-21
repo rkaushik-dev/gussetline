@@ -22,6 +22,9 @@ import io.github.rkaushikdev.gussetline.offers.PriceBreakdown;
 import io.github.rkaushikdev.gussetline.persistence.Database;
 import io.github.rkaushikdev.gussetline.persistence.TestDatabase;
 import io.github.rkaushikdev.gussetline.persistence.UnitOfWork;
+import io.github.rkaushikdev.gussetline.persistence.models.RecommendationRow;
+import io.github.rkaushikdev.gussetline.persistence.models.TicketRow;
+import io.github.rkaushikdev.gussetline.persistence.models.WatchRow;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -39,6 +42,7 @@ import org.springframework.test.web.servlet.MockMvc;
 class ApiAppTest {
 
     private static final LocalDateTime SEEN = LocalDateTime.of(2025, 6, 28, 9, 0);
+    private static final LocalDate TODAY = LocalDate.of(2025, 6, 28);
 
     @Autowired
     private MockMvc mvc;
@@ -65,6 +69,53 @@ class ApiAppTest {
     private void saveOffers(Offer... offers) {
         try (UnitOfWork work = database.unit()) {
             work.observations().saveAll(List.of(offers));
+            work.commit();
+        }
+    }
+
+    private int seedTicket() {
+        return seedTicket("open");
+    }
+
+    private int seedTicket(String state) {
+        try (UnitOfWork work = database.unit()) {
+            TicketRow ticket = Rows.ticket(LocalDate.of(2025, 8, 4));
+            WatchRow watch = Rows.watch("FRA-NYC-2025-08-04-Y", LocalDate.of(2025, 8, 4));
+            RecommendationRow made = Rows.recommendation(TODAY, state, "90.00");
+            made.setResidual("refundable");
+            watch.addRecommendation(made);
+            ticket.addWatch(watch);
+            work.session().persist(ticket);
+            work.commit();
+            return made.getId();
+        }
+    }
+
+    private void aQueueRow() {
+        aQueueRow(LocalDate.of(2025, 7, 29), "open");
+    }
+
+    private void aQueueRow(LocalDate raised, String state) {
+        try (UnitOfWork work = database.unit()) {
+            TicketRow ticket = work.session()
+                    .createQuery("select t from TicketRow t", TicketRow.class)
+                    .setMaxResults(1)
+                    .getResultStream()
+                    .findFirst()
+                    .orElseGet(() -> {
+                        TicketRow made = Rows.ticket(LocalDate.of(2025, 8, 24));
+                        work.session().persist(made);
+                        work.flush();
+                        return made;
+                    });
+            WatchRow watch = Rows.watch("FRA-NYC-2025-08-24-Y", LocalDate.of(2025, 8, 24));
+            watch.setTicketId(ticket.getId());
+            work.session().persist(watch);
+            work.flush();
+            RecommendationRow made = Rows.recommendation(raised, state, "90.00");
+            made.setWatchId(watch.getId());
+            made.setResidual("refundable");
+            work.session().persist(made);
             work.commit();
         }
     }
@@ -149,6 +200,13 @@ class ApiAppTest {
     }
 
     @Test
+    void theErrorBodyCarriesTheDomainCodeAndNotAnHttpOne() {
+        Http.Answer reply = client.get("/watches/ticket/220-nothing");
+        assertThat(reply.status()).isEqualTo(404);
+        assertThat(reply.json().path("code").asText()).isEqualTo("record.not_found");
+    }
+
+    @Test
     void aSeriesReadsBackCheapestFirst() {
         saveOffers(anOffer("840.00"), anOffer("790.00"));
         Http.Answer reply = client.get("/observations/series/FRA-NYC-2025-08-04-Y");
@@ -221,6 +279,71 @@ class ApiAppTest {
     }
 
     @Test
+    void theLiveWatchesComeBack() {
+        seedTicket();
+        Http.Answer reply = client.get("/watches", "on", "2025-06-28");
+        assertThat(reply.status()).isEqualTo(200);
+        JsonNode body = reply.json();
+        assertThat(body).hasSize(1);
+        assertThat(body.path(0).path("ticket_number").asText()).isEqualTo("220-1234567890");
+        assertThat(body.path(0).path("threshold").path("amount").asText()).isEqualTo("50.00");
+    }
+
+    @Test
+    void theWatchesOfOneTicketCanBeFound() {
+        seedTicket();
+        Http.Answer reply = client.get("/watches/ticket/220-1234567890");
+        assertThat(reply.status()).isEqualTo(200);
+        assertThat(reply.json()).hasSize(1);
+    }
+
+    @Test
+    void aRecommendationReadsBackWithEveryNumber() {
+        int identifier = seedTicket();
+        JsonNode body = client.get("/watches/recommendations/" + identifier).json();
+        assertThat(body.path("state").asText()).isEqualTo("open");
+        assertThat(body.path("paid").path("amount").asText()).isEqualTo("840.00");
+        assertThat(body.path("benefit").path("amount").asText()).isEqualTo("90.00");
+    }
+
+    @Test
+    void takingARecommendationRecordsWhoDidIt() {
+        int identifier = seedTicket();
+        Http.Answer reply = client.post(
+                "/watches/recommendations/" + identifier + "/take", Map.of("by", "anna", "note", "reissued on LH"));
+        assertThat(reply.status()).isEqualTo(200);
+        assertThat(reply.json().path("state").asText()).isEqualTo("taken");
+        assertThat(reply.json().path("decided_by").asText()).isEqualTo("anna");
+    }
+
+    @Test
+    void killingARecommendationIsRecordedToo() {
+        int identifier = seedTicket();
+        Http.Answer reply = client.post("/watches/recommendations/" + identifier + "/kill", Map.of("by", "anna"));
+        assertThat(reply.json().path("state").asText()).isEqualTo("killed");
+    }
+
+    @Test
+    void aDecisionWithNoNameAgainstItIsRefused() {
+        int identifier = seedTicket();
+        Http.Answer reply = client.post("/watches/recommendations/" + identifier + "/take", Map.of("by", ""));
+        assertThat(reply.status()).isEqualTo(422);
+    }
+
+    @Test
+    void settlingASettledRecommendationIsAConflict() {
+        int identifier = seedTicket("taken");
+        Http.Answer reply = client.post("/watches/recommendations/" + identifier + "/kill", Map.of("by", "bruno"));
+        assertThat(reply.status()).isEqualTo(409);
+        assertThat(reply.json().path("code").asText()).isEqualTo("record.conflict");
+    }
+
+    @Test
+    void aRecommendationWeDoNotHaveIsANotFound() {
+        assertThat(client.get("/watches/recommendations/999").status()).isEqualTo(404);
+    }
+
+    @Test
     void theOpenapiDocumentIsServed() {
         try (ConfigurableApplicationContext service = GussetlineApplication.run(
                 TestService.settings(), database, "--server.port=0", "--server.address=127.0.0.1")) {
@@ -228,6 +351,62 @@ class ApiAppTest {
             assertThat(reply.status()).isEqualTo(200);
             assertThat(reply.json().path("info").path("title").asText()).isEqualTo("gussetline");
         }
+    }
+
+    @Test
+    void theQueueOfAnEmptyDeskIsEmpty() {
+        JsonNode body = client.get("/queue", "on", "2025-07-30").json();
+        assertThat(body.path("open").asInt()).isZero();
+        assertThat(body.path("places")).isEmpty();
+        assertThat(body.path("worth").path("amount").asText()).isEqualTo("0");
+    }
+
+    @Test
+    void theQueueCarriesTheThreeNumbersTheScreenShows() {
+        aQueueRow();
+        Map<String, Object> body = client.get("/queue", "on", "2025-07-30").map();
+        assertThat(body.get("open")).isEqualTo(1);
+        assertThat(body.get("worth")).isEqualTo(Map.of("amount", "90.00", "currency", "EUR"));
+        assertThat(body.get("as_of")).isEqualTo("2025-07-30");
+    }
+
+    @Test
+    void aPlaceSaysWhyItIsWhereItIs() {
+        aQueueRow(LocalDate.of(2025, 7, 28), "open");
+        JsonNode place =
+                client.get("/queue", "on", "2025-07-30").json().path("places").path(0);
+        assertThat(place.path("ticket_number").asText()).isEqualTo("220-1234567890");
+        assertThat(place.path("urgent").isBoolean()).isTrue();
+        assertThat(place.path("urgent").asBoolean()).isTrue();
+        assertThat(place.path("why").asText()).contains("expires today");
+    }
+
+    @Test
+    void aScoreCrossesTheWireAsAString() {
+        // A float would round it differently in every client that read it.
+        aQueueRow();
+        JsonNode place =
+                client.get("/queue", "on", "2025-07-30").json().path("places").path(0);
+        assertThat(place.path("score").isTextual()).isTrue();
+    }
+
+    @Test
+    void aSettledRecommendationIsNotInTheQueue() {
+        aQueueRow(LocalDate.of(2025, 7, 29), "taken");
+        assertThat(client.get("/queue", "on", "2025-07-30").json().path("open").asInt())
+                .isZero();
+    }
+
+    @Test
+    void theQueueCanBeCappedForACallerThatWantsTheTopOfIt() {
+        aQueueRow();
+        JsonNode body = client.get("/queue", "on", "2025-07-30", "limit", "1").json();
+        assertThat(body.path("places")).hasSize(1);
+    }
+
+    @Test
+    void aLimitOfNothingIsABadRequest() {
+        assertThat(client.get("/queue", "limit", "0").status()).isEqualTo(422);
     }
 
     @Test

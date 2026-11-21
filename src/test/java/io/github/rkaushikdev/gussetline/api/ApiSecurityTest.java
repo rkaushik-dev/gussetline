@@ -8,6 +8,7 @@ import io.github.rkaushikdev.gussetline.persistence.UnitOfWork;
 import io.github.rkaushikdev.gussetline.persistence.models.TicketRow;
 import io.github.rkaushikdev.gussetline.persistence.models.WatchRow;
 import java.time.LocalDate;
+import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -139,6 +140,28 @@ class ApiSecurityTest {
     }
 
     @Test
+    void aReaderCanReadWatches() {
+        Http.Answer reply = client.as("reader-key").get("/watches");
+        assertThat(reply.status()).isEqualTo(200);
+    }
+
+    @Test
+    void aReaderCannotSettleARecommendation() {
+        Http.Answer reply = client.as("reader-key").post("/watches/recommendations/1/take", Map.of("by", "anna"));
+        assertThat(reply.status()).isEqualTo(403);
+        Map<String, Object> body = reply.map();
+        assertThat(body.get("code")).isEqualTo("auth.forbidden");
+        assertThat(body.get("details")).isEqualTo(Map.of("key", "screens", "has", "reader", "needs", "agent"));
+    }
+
+    @Test
+    void anAgentCanSettleARecommendation() {
+        Http.Answer reply = client.as("agent-key").post("/watches/recommendations/1/take", Map.of("by", "anna"));
+        assertThat(reply.status()).isEqualTo(200);
+        assertThat(reply.json().path("state").asText()).isEqualTo("taken");
+    }
+
+    @Test
     void anAgentCannotSeeTheSupplierScreen() {
         Http.Answer reply = client.as("agent-key").get("/sources");
         assertThat(reply.status()).isEqualTo(403);
@@ -146,9 +169,28 @@ class ApiSecurityTest {
     }
 
     @Test
+    void anOperatorCanSeeEverything() {
+        Http operator = client.as("operator-key");
+        assertThat(operator.get("/sources").status()).isEqualTo(200);
+        assertThat(operator.get("/watches").status()).isEqualTo(200);
+        assertThat(operator.post("/watches/recommendations/1/kill", Map.of("by", "ops"))
+                        .status())
+                .isEqualTo(200);
+    }
+
+    @Test
     void healthNeedsNoKeyAtAll() {
         assertThat(client.get("/health").status()).isEqualTo(200);
         assertThat(client.get("/ready").status()).isEqualTo(200);
+    }
+
+    @Test
+    void anApplicationWithNoRingLetsEverythingThrough() {
+        try (ConfigurableApplicationContext service = serve(Optional.empty())) {
+            Http open = Http.on(GussetlineApplication.port(service));
+            assertThat(open.get("/sources").status()).isEqualTo(200);
+            assertThat(open.get("/watches").status()).isEqualTo(200);
+        }
     }
 
     @Test

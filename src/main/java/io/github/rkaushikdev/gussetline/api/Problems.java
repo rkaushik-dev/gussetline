@@ -136,12 +136,33 @@ final class Problems {
     static Problem mismatched(MethodArgumentTypeMismatchException failure) {
         List<Object> loc = List.of(where(failure.getParameter()), failure.getName());
         Object raw = failure.getValue();
+        Class<?> wanted = failure.getRequiredType();
         for (Throwable cause = failure.getCause(); cause != null; cause = cause.getCause()) {
             if (cause instanceof Unfit unfit) {
                 return new Problem(unfit.type(), loc, unfit.getMessage(), raw, unfit.context());
             }
         }
-        return notA(failure.getRequiredType(), loc, raw);
+        // A value bound to a primitive is retried by the binder's own readers once the service's
+        // have refused it, and the last refusal is the one that arrives here; read it again for the
+        // reason.
+        if (raw instanceof String text) {
+            try {
+                reread(wanted, text);
+            } catch (Unfit unfit) {
+                return new Problem(unfit.type(), loc, unfit.getMessage(), raw, unfit.context());
+            }
+        }
+        return notA(wanted, loc, raw);
+    }
+
+    private static void reread(Class<?> wanted, String text) {
+        if (wanted == int.class || wanted == Integer.class || wanted == long.class || wanted == Long.class) {
+            WireText.whole(text);
+        } else if (wanted == LocalDate.class) {
+            WireText.date(text);
+        } else if (wanted == LocalDateTime.class) {
+            WireText.dateTime(text);
+        }
     }
 
     private static List<Problem> fieldProblems(Errors errors, Object body, Class<?> shape) {

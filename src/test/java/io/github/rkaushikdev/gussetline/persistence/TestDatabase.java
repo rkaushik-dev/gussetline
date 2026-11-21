@@ -19,7 +19,8 @@ import org.assertj.core.api.ThrowableAssert.ThrowingCallable;
  * schema with nothing in it, and the generated keys counting from one again.
  *
  * <p>A test opens a {@link TestSession} in {@code @BeforeEach} with {@link #session()} and closes
- * it in {@code @AfterEach}; anything it needs beyond that it reaches through {@link #engine()}.
+ * it in {@code @AfterEach}, or, to work through units of work, takes a {@link #database()}; anything
+ * it needs beyond that it reaches through {@link #engine()}.
  */
 public final class TestDatabase {
 
@@ -46,6 +47,16 @@ public final class TestDatabase {
         Engine engine = engine();
         empty(engine);
         return new TestSession(engine.entityManagerFactory().createEntityManager());
+    }
+
+    /**
+     * A database over the shared engine, emptied of every row, for a test that opens units of work on
+     * it. Closing it leaves the shared engine open, so a test need not close it.
+     */
+    public static Database database() {
+        Engine engine = engine();
+        empty(engine);
+        return new Database(engine);
     }
 
     /**

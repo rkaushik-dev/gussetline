@@ -13,6 +13,7 @@ import jakarta.persistence.Index;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.OneToMany;
+import jakarta.persistence.OrderBy;
 import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
 import java.util.ArrayList;
@@ -64,7 +65,9 @@ public class RuleRow extends Timestamped {
     @Column(name = "filed_text", length = 8192, nullable = false)
     private String filedText = "";
 
+    /** In the order they were filed, which is the order of their ids. */
     @OneToMany(mappedBy = "rule", cascade = CascadeType.ALL, orphanRemoval = true)
+    @OrderBy("id")
     private List<ProvisionRow> provisions = new ArrayList<>();
 
     public Integer getId() {
@@ -113,7 +116,7 @@ public class RuleRow extends Timestamped {
         this.filedText = filedText;
     }
 
-    /** The provisions, read only; change them through the methods below. */
+    /** The provisions in the order they were filed, read only; change them through the methods below. */
     public List<ProvisionRow> getProvisions() {
         return Collections.unmodifiableList(provisions);
     }

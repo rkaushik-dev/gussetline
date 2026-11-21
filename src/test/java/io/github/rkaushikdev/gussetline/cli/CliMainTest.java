@@ -18,6 +18,7 @@ import io.github.rkaushikdev.gussetline.persistence.Database;
 import io.github.rkaushikdev.gussetline.persistence.UnitOfWork;
 import java.io.IOException;
 import java.nio.file.Path;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -147,6 +148,29 @@ class CliMainTest {
         runner.run("--database", onDisk, "create-schema");
         Shell.Result reply = runner.run("--database", onDisk, "check", "--fit");
         assertThat(reply.output()).contains("fares         0");
+    }
+
+    @Test
+    void aDeskWithSomethingInItAnswersThoseQuestionsYes() {
+        // Seeded as of today, because the two date questions ask whether the desk is collecting now
+        // and not whether it ever did.
+        runner.run("--database", onDisk, "create-schema");
+        runner.run("--database", onDisk, "seed", "--on", LocalDate.now().toString());
+        Shell.Result reply = runner.run("--database", onDisk, "check", "--fit");
+        for (String question : List.of("tariff", "rules", "combinability", "observations")) {
+            assertThat(reply.output()).contains("ok  " + question);
+        }
+    }
+
+    @Test
+    void aDeskThatHasNeverCollectedIsNotFitHoweverFullItIs() {
+        // A seeded desk holds fares, rules and a week of readings and has never run a collection,
+        // which is exactly the state a count cannot see.
+        runner.run("--database", onDisk, "create-schema");
+        runner.run("--database", onDisk, "seed", "--on", LocalDate.now().toString());
+        Shell.Result reply = runner.run("--database", onDisk, "check", "--fit");
+        assertThat(reply.code()).isEqualTo(OPERATOR_CAN_FIX);
+        assertThat(reply.output()).contains("not fit: collecting");
     }
 
     @Test

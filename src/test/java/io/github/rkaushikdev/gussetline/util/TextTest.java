@@ -92,6 +92,18 @@ class TextTest {
     }
 
     @Test
+    void upperCaseNeedsACasedCharacterAndNoLowerCaseOne() {
+        assertThat(Text.isUpper("NYC")).isTrue();
+        assertThat(Text.isUpper("A1B")).isTrue();
+        assertThat(Text.isUpper("\u00c9TE")).isTrue();
+        assertThat(Text.isUpper("123")).isFalse();
+        assertThat(Text.isUpper("")).isFalse();
+        assertThat(Text.isUpper("Nyc")).isFalse();
+        assertThat(Text.isUpper("N\u01c5C")).isFalse();
+        assertThat(Text.isUpper("\u00df")).isFalse();
+    }
+
+    @Test
     void reprQuotesTextInSingleQuotesUnlessItHoldsOne() {
         assertThat(Text.repr("LH")).isEqualTo("'LH'");
         assertThat(Text.repr("it's")).isEqualTo("\"it's\"");

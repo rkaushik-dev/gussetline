@@ -167,6 +167,23 @@ public final class Text {
     }
 
     /**
+     * Whether the text has at least one cased character and none of them is lower or title case, so
+     * {@code NYC} and {@code A1B} are upper case and {@code 123} and {@code Nyc} are not.
+     */
+    public static boolean isUpper(String text) {
+        boolean cased = false;
+        for (int index = 0; index < text.length(); ) {
+            int point = text.codePointAt(index);
+            if (Character.isLowerCase(point) || Character.isTitleCase(point)) {
+                return false;
+            }
+            cased = cased || Character.isUpperCase(point);
+            index += Character.charCount(point);
+        }
+        return cased;
+    }
+
+    /**
      * A value in the quoted form error details print it in.
      *
      * <p>Text is quoted, in single quotes unless it holds a single quote and no double one, with

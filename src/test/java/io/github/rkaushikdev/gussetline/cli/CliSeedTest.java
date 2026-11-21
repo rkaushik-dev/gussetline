@@ -81,6 +81,16 @@ class CliSeedTest {
     }
 
     @Test
+    void aSeededDeskHasSomethingInEveryReport() {
+        runner.run("seed", "--on", TODAY);
+        runner.run("night", "--on", TODAY);
+
+        assertThat(runner.run("report", "savings", "--until", TODAY).output()).contains("found");
+        assertThat(runner.run("report", "queue", "--on", TODAY).output()).contains("2 open");
+        assertThat(runner.run("report", "coverage", "--on", TODAY).output()).contains("followed  2");
+    }
+
+    @Test
     void aDeskThatAlreadyHoldsSomethingIsLeftAlone() {
         // Invented fares next to filed ones with nothing to tell them apart.
         runner.run("seed", "--on", TODAY);

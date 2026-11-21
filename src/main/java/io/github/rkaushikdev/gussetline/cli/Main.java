@@ -47,7 +47,12 @@ import picocli.CommandLine.ParseResult;
         name = "gussetline",
         version = "gussetline, version " + Gussetline.VERSION,
         description = "Fare audit and reprice desk.",
-        subcommands = {Main.CheckDesk.class, Main.CreateSchema.class, Main.ShowSettings.class})
+        subcommands = {
+            Main.CheckDesk.class,
+            Main.CreateSchema.class,
+            LoadCommands.Load.class,
+            Main.ShowSettings.class,
+        })
 public final class Main {
 
     @Option(names = "--database", paramLabel = "TEXT", description = "Override the database url.")

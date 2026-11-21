@@ -13,7 +13,6 @@ import io.github.rkaushikdev.gussetline.TariffError;
 import io.github.rkaushikdev.gussetline.ValidationError;
 import io.github.rkaushikdev.gussetline.logs.Logs;
 import jakarta.servlet.http.HttpServletRequest;
-import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -210,10 +209,8 @@ public final class Errors {
     }
 
     private static String text(HttpServletRequest request) {
-        try {
-            return new String(request.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-        } catch (IOException unreadable) {
-            return "";
-        }
+        return BodyKept.of(request)
+                .map(body -> new String(body, StandardCharsets.UTF_8))
+                .orElse("");
     }
 }

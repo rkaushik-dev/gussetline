@@ -169,6 +169,9 @@ final class Problems {
     private static Problem constraint(
             ConstraintViolation<?> violation, List<Object> loc, Object value, Object container) {
         Annotation broken = violation.getConstraintDescriptor().getAnnotation();
+        if (broken instanceof NotNull && loc.get(loc.size() - 1) instanceof Integer) {
+            return notA(raw(typeAt(violation.getRootBeanClass(), loc.subList(1, loc.size()))), loc, null);
+        }
         if (broken instanceof NotNull) {
             return new Problem("missing", loc, FIELD_REQUIRED, container);
         }
@@ -321,24 +324,52 @@ final class Problems {
         for (Object step : path) {
             if (step instanceof Integer index) {
                 ranks.add(index);
-                here = argument(here);
-                continue;
+            } else {
+                ranks.add(place(here, step));
             }
-            Class<?> type = raw(here);
-            RecordComponent[] components =
-                    type != null && type.isRecord() ? type.getRecordComponents() : new RecordComponent[0];
-            int place = Integer.MAX_VALUE;
-            Type next = Object.class;
-            for (int index = 0; index < components.length; index++) {
-                if (snake(components[index].getName()).equals(step)) {
-                    place = index;
-                    next = components[index].getGenericType();
-                }
-            }
-            ranks.add(place);
-            here = raw(next) == Optional.class ? argument(next) : next;
+            here = step(here, step);
         }
         return ranks;
+    }
+
+    /** The declared type of the value at a path, or {@code Object} when the path leaves the shape. */
+    private static Type typeAt(Class<?> shape, List<Object> path) {
+        Type here = shape;
+        for (Object step : path) {
+            here = step(here, step);
+        }
+        return here;
+    }
+
+    /** The type one step down: a list's items, or a record's field, seen through an {@code Optional}. */
+    private static Type step(Type here, Object step) {
+        if (step instanceof Integer) {
+            return argument(here);
+        }
+        Class<?> type = raw(here);
+        if (type != null && type.isRecord()) {
+            for (RecordComponent component : type.getRecordComponents()) {
+                if (snake(component.getName()).equals(step)) {
+                    Type next = component.getGenericType();
+                    return raw(next) == Optional.class ? argument(next) : next;
+                }
+            }
+        }
+        return Object.class;
+    }
+
+    /** Where a field sits among its record's fields; past the end when it is not one of them. */
+    private static int place(Type here, Object step) {
+        Class<?> type = raw(here);
+        if (type != null && type.isRecord()) {
+            RecordComponent[] components = type.getRecordComponents();
+            for (int index = 0; index < components.length; index++) {
+                if (snake(components[index].getName()).equals(step)) {
+                    return index;
+                }
+            }
+        }
+        return Integer.MAX_VALUE;
     }
 
     private static int compareRanks(List<Integer> left, List<Integer> right) {

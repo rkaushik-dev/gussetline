@@ -1,10 +1,7 @@
 package io.github.rkaushikdev.gussetline.api;
 
-import io.github.rkaushikdev.gussetline.Gussetline;
 import io.github.rkaushikdev.gussetline.config.Settings;
 import io.github.rkaushikdev.gussetline.persistence.Database;
-import io.swagger.v3.oas.models.OpenAPI;
-import io.swagger.v3.oas.models.info.Info;
 import java.util.Objects;
 import java.util.Optional;
 import org.springframework.boot.SpringApplication;
@@ -42,12 +39,6 @@ import org.springframework.context.annotation.Bean;
             FlywayAutoConfiguration.class
         })
 public class GussetlineApplication {
-
-    /** The service's name in its API document. */
-    public static final String TITLE = "gussetline";
-
-    /** What the service is, in its API document. */
-    public static final String SUMMARY = "Fare audit and reprice desk";
 
     /** The system property that picks Spring Boot's logging system; {@code none} leaves logging alone. */
     static final String LOGGING_SYSTEM = "org.springframework.boot.logging.LoggingSystem";
@@ -116,11 +107,5 @@ public class GussetlineApplication {
     @Bean
     Jackson2ObjectMapperBuilderCustomizer wire() {
         return Wire::configure;
-    }
-
-    /** The head of the API document. */
-    @Bean
-    OpenAPI document() {
-        return new OpenAPI().info(new Info().title(TITLE).summary(SUMMARY).version(Gussetline.VERSION));
     }
 }

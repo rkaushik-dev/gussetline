@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.fasterxml.jackson.databind.JsonNode;
 import io.github.rkaushikdev.gussetline.ConflictError;
 import io.github.rkaushikdev.gussetline.ConstructionError;
+import io.github.rkaushikdev.gussetline.Fixtures;
 import io.github.rkaushikdev.gussetline.NoFareFound;
 import io.github.rkaushikdev.gussetline.NotFoundError;
 import io.github.rkaushikdev.gussetline.SupplierBlocked;
@@ -14,6 +15,10 @@ import io.github.rkaushikdev.gussetline.collect.Outcome;
 import io.github.rkaushikdev.gussetline.collect.Result;
 import io.github.rkaushikdev.gussetline.collect.RunReport;
 import io.github.rkaushikdev.gussetline.collect.Task;
+import io.github.rkaushikdev.gussetline.itinerary.Itinerary;
+import io.github.rkaushikdev.gussetline.money.Money;
+import io.github.rkaushikdev.gussetline.offers.Offer;
+import io.github.rkaushikdev.gussetline.offers.PriceBreakdown;
 import io.github.rkaushikdev.gussetline.persistence.Database;
 import io.github.rkaushikdev.gussetline.persistence.TestDatabase;
 import io.github.rkaushikdev.gussetline.persistence.UnitOfWork;
@@ -33,6 +38,8 @@ import org.springframework.test.web.servlet.MockMvc;
 @Import(TestService.class)
 class ApiAppTest {
 
+    private static final LocalDateTime SEEN = LocalDateTime.of(2025, 6, 28, 9, 0);
+
     @Autowired
     private MockMvc mvc;
 
@@ -43,6 +50,23 @@ class ApiAppTest {
     void open() {
         database = TestDatabase.database();
         client = Http.over(mvc);
+    }
+
+    private static Offer anOffer(String amount) {
+        return new Offer(
+                "gds",
+                new Itinerary(
+                        List.of(Fixtures.segment("LH", "400", "FRA", "JFK", "2025-08-04 10:25", "2025-08-04 13:05"))),
+                new PriceBreakdown(Money.of(amount, "EUR")),
+                List.of("KLWAP7RT"),
+                SEEN);
+    }
+
+    private void saveOffers(Offer... offers) {
+        try (UnitOfWork work = database.unit()) {
+            work.observations().saveAll(List.of(offers));
+            work.commit();
+        }
     }
 
     private void recordRun(LocalDateTime started) {
@@ -102,6 +126,98 @@ class ApiAppTest {
         String first = client.get("/health").header("X-Request-Id");
         String second = client.get("/health").header("X-Request-Id");
         assertThat(first).isNotEqualTo(second);
+    }
+
+    @Test
+    void aNotFoundComesBackInTheOneErrorShape() {
+        Http.Answer reply = client.get("/observations/series/FRA-LON-2099-01-01-Y");
+        assertThat(reply.status()).isEqualTo(404);
+        JsonNode body = reply.json();
+        assertThat(body.path("code").asText()).isEqualTo("record.not_found");
+        assertThat(body.path("details").path("series_key").asText()).isEqualTo("FRA-LON-2099-01-01-Y");
+        assertThat(body.path("request_id").asText()).isNotEmpty();
+    }
+
+    @Test
+    void aSeriesKeyThatIsNotOneIsRefusedRatherThanLookedUp() {
+        // Both answers are empty, but a 404 tells a caller who mistyped the
+        // departure that the desk holds nothing for that series, which is not
+        // what happened.
+        Http.Answer reply = client.get("/observations/series/nothing-at-all");
+        assertThat(reply.status()).isEqualTo(422);
+        assertThat(reply.json().path("details").path("key").asText()).isEqualTo("nothing-at-all");
+    }
+
+    @Test
+    void aSeriesReadsBackCheapestFirst() {
+        saveOffers(anOffer("840.00"), anOffer("790.00"));
+        Http.Answer reply = client.get("/observations/series/FRA-NYC-2025-08-04-Y");
+        assertThat(reply.status()).isEqualTo(200);
+        JsonNode body = reply.json();
+        assertThat(body.path("offers"))
+                .extracting(offer -> offer.path("total").path("amount").asText())
+                .containsExactly("790.00", "840.00");
+        assertThat(body.path("cheapest").path("amount").asText()).isEqualTo("790.00");
+    }
+
+    @Test
+    void anAmountCrossesTheWireAsAString() {
+        saveOffers(anOffer("840.00"));
+        JsonNode amount = client.get("/observations/series/FRA-NYC-2025-08-04-Y")
+                .json()
+                .path("offers")
+                .path(0)
+                .path("base")
+                .path("amount");
+        assertThat(amount.asText()).isEqualTo("840.00");
+        assertThat(amount.isTextual()).isTrue();
+    }
+
+    @Test
+    void aMarketCanBeAddressedTheWayAPersonSaysIt() {
+        saveOffers(anOffer("840.00"));
+        Http.Answer reply =
+                client.get("/observations/market", "origin", "FRA", "destination", "JFK", "departure", "2025-08-04");
+        assertThat(reply.status()).isEqualTo(200);
+        // An agent asks for JFK and gets the market, because that is what a
+        // series is keyed on and what the tariff prices.
+        assertThat(reply.json().path("series_key").asText()).isEqualTo("FRA-NYC-2025-08-04-Y");
+    }
+
+    @Test
+    void aMarketQueryWithABadCodeIsRefusedBeforeItReachesStorage() {
+        Http.Answer reply = client.get(
+                "/observations/market", "origin", "FRANKFURT", "destination", "JFK", "departure", "2025-08-04");
+        assertThat(reply.status()).isEqualTo(422);
+    }
+
+    @Test
+    void theSourcesScreenListsEverySupplier() {
+        Http.Answer reply = client.get("/sources");
+        assertThat(reply.status()).isEqualTo(200);
+        assertThat(reply.json())
+                .extracting(supplier -> supplier.path("name").asText())
+                .containsExactly("calendar", "gds", "ndc");
+    }
+
+    @Test
+    void oneSupplierCanBeReadOnItsOwn() {
+        Http.Answer reply = client.get("/sources/gds");
+        assertThat(reply.status()).isEqualTo(200);
+        assertThat(reply.json().path("cost_per_call").asText()).isEqualTo("0.04");
+        assertThat(reply.json().path("capabilities"))
+                .extracting(JsonNode::asText)
+                .contains("shop");
+    }
+
+    @Test
+    void aSupplierWeDoNotHaveIsANotFound() {
+        assertThat(client.get("/sources/nobody").status()).isEqualTo(404);
+    }
+
+    @Test
+    void theProcessIdIsReportedBecauseTheBreakerIsPerProcess() {
+        assertThat(client.get("/sources/-/process").json().path("pid").asText()).isNotEmpty();
     }
 
     @Test

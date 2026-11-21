@@ -1,13 +1,12 @@
 package io.github.rkaushikdev.gussetline.api;
 
-import com.fasterxml.jackson.annotation.JsonSetter;
-import com.fasterxml.jackson.annotation.Nulls;
 import com.fasterxml.jackson.core.JsonGenerator;
 import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.core.JsonToken;
 import com.fasterxml.jackson.databind.DeserializationContext;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonDeserializer;
+import com.fasterxml.jackson.databind.JsonMappingException;
 import com.fasterxml.jackson.databind.JsonSerializer;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.PropertyNamingStrategies;
@@ -20,7 +19,6 @@ import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.util.List;
 import java.util.function.Function;
 import org.springframework.http.converter.json.Jackson2ObjectMapperBuilder;
 
@@ -35,9 +33,13 @@ import org.springframework.http.converter.json.Jackson2ObjectMapperBuilder;
  * a number sent for a name is refused rather than turned into one. A whole number may arrive as a
  * number, as a number with no fraction, as text ({@code "3"}) or as {@code true} and {@code false};
  * days and moments arrive as text in the forms {@link WireText} reads. A {@code null} is refused for
- * any field that cannot be empty, and a field left out takes its default or is reported missing.
+ * any text, number, day or moment that cannot be empty, and a field left out takes its default or is
+ * reported missing.
  */
 public final class Wire {
+
+    private static final String STRING_TYPE = "string_type";
+    private static final String NOT_A_STRING = "Input should be a valid string";
 
     private Wire() {}
 
@@ -61,17 +63,12 @@ public final class Wire {
     /** The readers and writers of the service's own, registered last so they win. */
     private static void finish(ObjectMapper mapper) {
         mapper.registerModule(module());
-        for (Class<?> kind : List.of(String.class, Integer.class, LocalDate.class, LocalDateTime.class)) {
-            mapper.configOverride(kind).setSetterInfo(JsonSetter.Value.forValueNulls(Nulls.FAIL));
-        }
-        mapper.configOverride(List.class).setSetterInfo(JsonSetter.Value.construct(Nulls.FAIL, Nulls.FAIL));
     }
 
     private static SimpleModule module() {
         SimpleModule module = new SimpleModule("gussetline-wire");
         module.addSerializer(LocalDateTime.class, new MomentWriter());
-        module.addDeserializer(
-                String.class, new Strict<>("string_type", "Input should be a valid string", text -> text));
+        module.addDeserializer(String.class, new Strict<>(STRING_TYPE, NOT_A_STRING, text -> text));
         module.addDeserializer(Integer.class, new WholeNumber());
         module.addDeserializer(int.class, new WholeNumber());
         module.addDeserializer(
@@ -91,23 +88,50 @@ public final class Wire {
         }
     }
 
-    /** A value that only ever arrives as a JSON string, read from the text by {@code read}. */
-    private static final class Strict<T> extends JsonDeserializer<T> {
+    /**
+     * A reader that refuses an explicit {@code null} in the words of its type, and reads a field left
+     * out as nothing, so the field's default or a missing field report can follow.
+     */
+    private abstract static class Refusing<T> extends JsonDeserializer<T> {
 
         private final String type;
         private final String message;
+
+        Refusing(String type, String message) {
+            this.type = type;
+            this.message = message;
+        }
+
+        /** A refusal of the value the parser is on, in this reader's words. */
+        final Refused refusal(JsonParser in) {
+            return new Refused(in, new Unfit(type, message));
+        }
+
+        @Override
+        public T getNullValue(DeserializationContext context) throws JsonMappingException {
+            throw refusal(context.getParser());
+        }
+
+        @Override
+        public Object getAbsentValue(DeserializationContext context) {
+            return null;
+        }
+    }
+
+    /** A value that only ever arrives as a JSON string, read from the text by {@code read}. */
+    private static final class Strict<T> extends Refusing<T> {
+
         private final Function<String, T> read;
 
         Strict(String type, String message, Function<String, T> read) {
-            this.type = type;
-            this.message = message;
+            super(type, message);
             this.read = read;
         }
 
         @Override
         public T deserialize(JsonParser in, DeserializationContext context) throws IOException {
             if (!in.hasToken(JsonToken.VALUE_STRING)) {
-                throw new Refused(in, new Unfit(type, message));
+                throw refusal(in);
             }
             try {
                 return read.apply(in.getText());
@@ -117,8 +141,27 @@ public final class Wire {
         }
     }
 
+    /**
+     * Text that may also be {@code null}, for a field that can be empty: {@code @JsonDeserialize(contentUsing
+     * = Wire.NullableText.class) Optional<String>}. Anything but a string or {@code null} is refused.
+     */
+    public static final class NullableText extends JsonDeserializer<String> {
+
+        @Override
+        public String deserialize(JsonParser in, DeserializationContext context) throws IOException {
+            if (!in.hasToken(JsonToken.VALUE_STRING)) {
+                throw new Refused(in, new Unfit(STRING_TYPE, NOT_A_STRING));
+            }
+            return in.getText();
+        }
+    }
+
     /** A whole number, from any of the forms that say one exactly. */
-    private static final class WholeNumber extends JsonDeserializer<Integer> {
+    private static final class WholeNumber extends Refusing<Integer> {
+
+        WholeNumber() {
+            super("int_type", "Input should be a valid integer");
+        }
 
         @Override
         public Integer deserialize(JsonParser in, DeserializationContext context) throws IOException {
@@ -129,7 +172,7 @@ public final class Wire {
                     case VALUE_STRING -> WireText.integer(in.getText());
                     case VALUE_TRUE -> 1;
                     case VALUE_FALSE -> 0;
-                    default -> throw new Unfit("int_type", "Input should be a valid integer");
+                    default -> throw refusal(in);
                 };
             } catch (Unfit unfit) {
                 throw new Refused(in, unfit);

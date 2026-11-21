@@ -1,11 +1,14 @@
 package io.github.rkaushikdev.gussetline.api;
 
+import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
 import io.github.rkaushikdev.gussetline.money.Money;
 import io.github.rkaushikdev.gussetline.util.Numbers;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotNull;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -142,13 +145,14 @@ public final class Schemas {
             @NotNull(message = Problems.FIELD_REQUIRED) LocalDate ticketing,
             String sellingCurrency,
             Optional<List<Integer>> breaks,
-            @NotNull(message = Problems.FIELD_REQUIRED) List<@Valid SectorIn> sectors) {
+            @NotNull(message = Problems.FIELD_REQUIRED) List<@Valid @NotNull SectorIn> sectors) {
 
         public PriceRequest {
             sellingCurrency = Objects.requireNonNullElse(sellingCurrency, "EUR");
             breaks = Objects.requireNonNullElse(breaks, Optional.<List<Integer>>empty())
                     .map(List::copyOf);
-            sectors = sectors == null ? null : List.copyOf(sectors);
+            // Kept as sent, empty places and all, so that validation can say which place was empty.
+            sectors = sectors == null ? null : Collections.unmodifiableList(new ArrayList<>(sectors));
         }
     }
 
@@ -168,7 +172,7 @@ public final class Schemas {
             @NotNull(message = Problems.FIELD_REQUIRED) LocalDateTime arrival,
             String bookingClass,
             String cabin,
-            Optional<String> operatingCarrier) {
+            @JsonDeserialize(contentUsing = Wire.NullableText.class) Optional<String> operatingCarrier) {
 
         public SectorIn {
             bookingClass = Objects.requireNonNullElse(bookingClass, "Y");

@@ -5,9 +5,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 import io.github.rkaushikdev.gussetline.combinability.Combinability;
 import io.github.rkaushikdev.gussetline.combinability.CombinabilityStore;
 import io.github.rkaushikdev.gussetline.itinerary.JourneyType;
+import io.github.rkaushikdev.gussetline.persistence.Database;
+import io.github.rkaushikdev.gussetline.persistence.TestDatabase;
+import io.github.rkaushikdev.gussetline.persistence.UnitOfWork;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
 
 class LoadCombinabilityTest {
@@ -263,5 +267,97 @@ class LoadCombinabilityTest {
         }
         assertThat(record.endOnEnd()).isTrue();
         assertThat(record.sameCarrierOnly()).isFalse();
+    }
+
+    @Test
+    void aRecordSurvivesTheRoundTripThroughTheDatabase() {
+        Database database = TestDatabase.database();
+        Combinability record = firstRecord(line().circleTrip("Y").endOnEnd("Y").anyCarrier("Y"));
+        try (UnitOfWork work = database.unit()) {
+            work.combinability().save(record);
+            work.commit();
+        }
+
+        Optional<Combinability> back;
+        try (UnitOfWork work = database.unit()) {
+            back = work.combinability().get("LH", "KLWAP7RT");
+        }
+        assertThat(back).contains(record);
+    }
+
+    @Test
+    void savingTheSamePairTwiceUpdatesRatherThanDuplicates() {
+        Database database = TestDatabase.database();
+        try (UnitOfWork work = database.unit()) {
+            work.combinability().save(firstRecord(line().circleTrip("Y")));
+            work.commit();
+        }
+        try (UnitOfWork work = database.unit()) {
+            work.combinability().save(firstRecord(line()));
+            work.commit();
+        }
+
+        Optional<Combinability> back;
+        try (UnitOfWork work = database.unit()) {
+            assertThat(work.combinability().count()).isEqualTo(1);
+            back = work.combinability().get("LH", "KLWAP7RT");
+        }
+        assertThat(back).isPresent();
+        assertThat(back.get().circleTrip()).isFalse();
+    }
+
+    @Test
+    void theStoreForACarrierIsReadInOneGo() {
+        Database database = TestDatabase.database();
+        try (UnitOfWork work = database.unit()) {
+            work.combinability()
+                    .saveAll(CombinabilityFeed.read(fileOf(
+                                    line().write(), line().basis("MLWAP7RT").write()))
+                            .records());
+            work.combinability().save(firstRecord(line().carrier("UA")));
+            work.commit();
+        }
+
+        CombinabilityStore store;
+        try (UnitOfWork work = database.unit()) {
+            store = work.combinability().storeFor(List.of("LH"));
+        }
+        assertThat(store.bases("LH")).containsExactly("KLWAP7RT", "MLWAP7RT");
+        assertThat(store.get("UA", "KLWAP7RT")).isEmpty();
+    }
+
+    @Test
+    void theStoreForNoCarriersIsEmptyWithoutAQuery() {
+        Database database = TestDatabase.database();
+        try (UnitOfWork work = database.unit()) {
+            assertThat(work.combinability().storeFor(List.of()).size()).isZero();
+        }
+    }
+
+    @Test
+    void aWithdrawnRecordIsDeletedAndNotBlanked() {
+        Database database = TestDatabase.database();
+        try (UnitOfWork work = database.unit()) {
+            work.combinability().save(firstRecord(line()));
+            work.commit();
+        }
+
+        try (UnitOfWork work = database.unit()) {
+            assertThat(work.combinability().delete("LH", "KLWAP7RT")).isTrue();
+            work.commit();
+        }
+
+        try (UnitOfWork work = database.unit()) {
+            assertThat(work.combinability().count()).isZero();
+            assertThat(work.combinability().get("LH", "KLWAP7RT")).isEmpty();
+        }
+    }
+
+    @Test
+    void deletingSomethingThatIsNotThereSaysSo() {
+        Database database = TestDatabase.database();
+        try (UnitOfWork work = database.unit()) {
+            assertThat(work.combinability().delete("LH", "NOTHING")).isFalse();
+        }
     }
 }

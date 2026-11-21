@@ -28,6 +28,18 @@ class TextTest {
     }
 
     @Test
+    void codePointOrderPutsACharacterAboveTheBasicPlaneAfterEveryOneInIt() {
+        String fullWidth = "\uFF21";
+        String grinning = "\uD83D\uDE00";
+        assertThat(fullWidth.compareTo(grinning)).isPositive();
+        assertThat(Text.CODE_POINT_ORDER.compare(fullWidth, grinning)).isNegative();
+        assertThat(Text.CODE_POINT_ORDER.compare(grinning, fullWidth)).isPositive();
+        assertThat(Text.CODE_POINT_ORDER.compare("ann", "anna")).isNegative();
+        assertThat(Text.CODE_POINT_ORDER.compare("anna", "bruno")).isNegative();
+        assertThat(Text.CODE_POINT_ORDER.compare("anna", "anna")).isZero();
+    }
+
+    @Test
     void aCodeIsStrippedAndUpperCase() {
         assertThat(Text.code(" lh ")).isEqualTo("LH");
     }

@@ -3,7 +3,9 @@ package io.github.rkaushikdev.gussetline.util;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -17,6 +19,15 @@ import java.util.stream.Collectors;
  * payloads and filing files arrive from systems that pad with all of them.
  */
 public final class Text {
+
+    /**
+     * Orders text character by character on Unicode code points, a text before any longer one it
+     * starts. That differs from {@link String#compareTo}, which compares UTF-16 units, once a
+     * character above U+FFFF meets one between U+E000 and U+FFFF: {@code compareTo} puts the first
+     * one first, this puts it last.
+     */
+    public static final Comparator<String> CODE_POINT_ORDER = (left, right) ->
+            Arrays.compare(left.codePoints().toArray(), right.codePoints().toArray());
 
     private Text() {}
 

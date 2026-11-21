@@ -8,9 +8,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.json.JsonMapper;
 import java.math.BigInteger;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
-import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -40,9 +38,6 @@ public final class Json {
             .enable(JsonReadFeature.ALLOW_NON_NUMERIC_NUMBERS)
             .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
             .build();
-
-    private static final Comparator<String> CODE_POINT_ORDER = (left, right) ->
-            Arrays.compare(left.codePoints().toArray(), right.codePoints().toArray());
 
     private Json() {}
 
@@ -122,7 +117,7 @@ public final class Json {
     }
 
     private static void object(Map<?, ?> members, StringBuilder out) {
-        Map<String, Object> named = new TreeMap<>(CODE_POINT_ORDER);
+        Map<String, Object> named = new TreeMap<>(Text.CODE_POINT_ORDER);
         for (Map.Entry<?, ?> member : members.entrySet()) {
             if (!(member.getKey() instanceof String key)) {
                 throw new IllegalArgumentException("a JSON key is text, not " + Text.repr(member.getKey()));

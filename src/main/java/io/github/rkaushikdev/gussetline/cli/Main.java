@@ -52,6 +52,7 @@ import picocli.CommandLine.ParseResult;
             CollectCommands.Collect.class,
             Main.CreateSchema.class,
             LoadCommands.Load.class,
+            PriceCommand.class,
             Main.ShowSettings.class,
         })
 public final class Main {

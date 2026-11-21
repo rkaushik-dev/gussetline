@@ -52,12 +52,14 @@ import picocli.CommandLine.ParseResult;
             Main.CheckDesk.class,
             CollectCommands.Collect.class,
             Main.CreateSchema.class,
+            ServeCommands.IssueKey.class,
             LoadCommands.Load.class,
             NightCommand.class,
             PriceCommand.class,
             PruneCommand.class,
             ReportCommands.Report.class,
             SeedCommand.class,
+            ServeCommands.Serve.class,
             Main.ShowSettings.class,
         })
 public final class Main {

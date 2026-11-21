@@ -1,5 +1,6 @@
 package io.github.rkaushikdev.gussetline.cli;
 
+import io.github.rkaushikdev.gussetline.api.Role;
 import io.github.rkaushikdev.gussetline.util.Numbers;
 import io.github.rkaushikdev.gussetline.util.Text;
 import java.nio.file.Files;
@@ -9,7 +10,9 @@ import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.time.format.ResolverStyle;
+import java.util.Arrays;
 import java.util.Locale;
+import java.util.stream.Collectors;
 import picocli.CommandLine.ITypeConverter;
 import picocli.CommandLine.TypeConversionException;
 
@@ -75,6 +78,27 @@ final class Values {
 
         private static TypeConversionException refused(String text, String why) {
             return new TypeConversionException("File " + Text.repr(text) + " " + why + ".");
+        }
+    }
+
+    /** A role a key is issued under, named exactly as it is configured: {@code reader}, {@code agent} or {@code operator}. */
+    static final class RoleName implements ITypeConverter<Role> {
+
+        /** How the choices are shown in a usage line. */
+        static final String CHOICES = "[reader|agent|operator]";
+
+        @Override
+        public Role convert(String text) {
+            for (Role role : Role.values()) {
+                if (role.value().equals(text)) {
+                    return role;
+                }
+            }
+            throw new TypeConversionException(Text.repr(text) + " is not one of "
+                    + Arrays.stream(Role.values())
+                            .map(role -> Text.repr(role.value()))
+                            .collect(Collectors.joining(", "))
+                    + ".");
         }
     }
 }

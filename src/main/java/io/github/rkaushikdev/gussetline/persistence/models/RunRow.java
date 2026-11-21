@@ -11,6 +11,7 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Index;
 import jakarta.persistence.OneToMany;
+import jakarta.persistence.OrderBy;
 import jakarta.persistence.Table;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -62,6 +63,7 @@ public class RunRow extends Timestamped {
     private String costCurrency = "EUR";
 
     @OneToMany(mappedBy = "run", cascade = CascadeType.ALL, orphanRemoval = true)
+    @OrderBy("id")
     private List<RunResultRow> results = new ArrayList<>();
 
     public Integer getId() {

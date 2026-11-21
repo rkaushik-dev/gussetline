@@ -122,9 +122,7 @@ public record Savings(String currency, Line overall, List<Line> byMonth, List<Li
          */
         @Override
         public String toString() {
-            String padding = " ".repeat(Math.max(0, LABEL_WIDTH - Text.length(label)));
-            return label
-                    + padding
+            return Text.padEnd(label, LABEL_WIDTH)
                     + String.format(Locale.ROOT, " raised %4d taken %4d worth %s", raised, taken, realised);
         }
     }

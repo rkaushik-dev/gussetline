@@ -7,6 +7,9 @@
             <pattern>%d{HH:mm:ss} %-5level %logger{36} %msg%n</pattern>
         </encoder>
     </appender>
+    <!-- The persistence tests provoke refused writes on purpose and assert on each one; the
+         driver's own report of every refusal is noise beside them. -->
+    <logger name="org.hibernate.engine.jdbc.spi.SqlExceptionHelper" level="OFF"/>
     <root level="WARN">
         <appender-ref ref="console"/>
     </root>

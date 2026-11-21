@@ -68,7 +68,7 @@ final class Problems {
             return notJson(parse.getLocation(), decodeError(parse.getOriginalMessage()));
         }
         if (cause instanceof MismatchedInputException trailing
-                && trailing.getOriginalMessage().startsWith("Trailing token")) {
+                && String.valueOf(trailing.getOriginalMessage()).startsWith("Trailing token")) {
             return notJson(trailing.getLocation(), "Extra data");
         }
         if (cause instanceof JsonMappingException mapping) {
@@ -121,7 +121,7 @@ final class Problems {
             String raw = sentValue(request, where, name);
             for (var error : result.getResolvableErrors()) {
                 ConstraintViolation<?> violation = result.unwrap(error, ConstraintViolation.class);
-                found.add(constraint(violation, List.of(where, name), raw, null));
+                found.add(constraint(violation, Object.class, List.of(where, name), raw, null));
             }
         }
         return found;
@@ -170,7 +170,7 @@ final class Problems {
         for (FieldError error : errors.getFieldErrors()) {
             List<Object> path = javaPath(error.getField());
             List<Object> loc = in("body", path);
-            Object container = at(body, path.subList(0, path.size() - 1));
+            Object container = path.isEmpty() ? body : at(body, path.subList(0, path.size() - 1));
             Object value = at(body, path);
             ConstraintViolation<?> violation;
             try {
@@ -179,19 +179,23 @@ final class Problems {
                 found.add(new Problem("value_error", loc, String.valueOf(error.getDefaultMessage()), value));
                 continue;
             }
-            found.add(constraint(violation, loc, value, container));
+            found.add(constraint(violation, shape, loc, value, container));
         }
         found.sort(Comparator.comparing(
                 problem -> rank(shape, problem.loc().subList(1, problem.loc().size())), Problems::compareRanks));
         return found;
     }
 
-    /** One broken constraint, in the words a caller is shown. */
+    /**
+     * One broken constraint, in the words a caller is shown. An empty place in a list is the wrong
+     * kind of value for the list's items; any other field that is not there is missing from the object
+     * around it.
+     */
     private static Problem constraint(
-            ConstraintViolation<?> violation, List<Object> loc, Object value, Object container) {
+            ConstraintViolation<?> violation, Class<?> shape, List<Object> loc, Object value, Object container) {
         Annotation broken = violation.getConstraintDescriptor().getAnnotation();
         if (broken instanceof NotNull && loc.get(loc.size() - 1) instanceof Integer) {
-            return notA(raw(typeAt(violation.getRootBeanClass(), loc.subList(1, loc.size()))), loc, null);
+            return notA(raw(typeAt(shape, loc.subList(1, loc.size()))), loc, null);
         }
         if (broken instanceof NotNull) {
             return new Problem("missing", loc, FIELD_REQUIRED, container);
@@ -271,7 +275,8 @@ final class Problems {
     }
 
     /** What the decoder ran into, in a short sentence. */
-    private static String decodeError(String message) {
+    private static String decodeError(String original) {
+        String message = String.valueOf(original);
         if (message.contains("double-quote to start field name")) {
             return "Expecting property name enclosed in double quotes";
         }

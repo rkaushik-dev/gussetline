@@ -260,6 +260,18 @@ class ApiRequestsTest {
     }
 
     @Test
+    void aSplitIsAWholeNumberHoweverItIsWritten() {
+        Map<String, Object> request = priceRequest(sector("2025-08-04T21:55", "2025-08-05T16:00"));
+        request.put("breaks", List.of("0", 0.0, true, 0.5));
+        assertThat(onlyProblem(client.post("/pricing", request)))
+                .isEqualTo(problem(
+                        "int_from_float",
+                        List.of("body", "breaks", 3),
+                        "Input should be a valid integer, got a number with a fractional part",
+                        0.5));
+    }
+
+    @Test
     void anEmptyPlaceAmongTheSectorsIsNamed() {
         Map<String, Object> request = new LinkedHashMap<>();
         request.put("ticketing", "2025-02-14");

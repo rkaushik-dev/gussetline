@@ -179,8 +179,9 @@ public final class Errors {
     @ExceptionHandler(RuntimeException.class)
     public ResponseEntity<Object> unexpected(RuntimeException failure, HttpServletRequest request) {
         if (failure instanceof ErrorResponse answered) {
-            HttpStatus status = HttpStatus.valueOf(answered.getStatusCode().value());
-            return ResponseEntity.status(status).body(detail(status.getReasonPhrase()));
+            HttpStatus known = HttpStatus.resolve(answered.getStatusCode().value());
+            return ResponseEntity.status(answered.getStatusCode())
+                    .body(detail(known == null ? "Error" : known.getReasonPhrase()));
         }
         Logs.problem(
                 "request failed",

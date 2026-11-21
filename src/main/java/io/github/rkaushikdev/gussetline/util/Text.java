@@ -151,6 +151,15 @@ public final class Text {
         return text.codePointCount(0, text.length());
     }
 
+    /**
+     * The text followed by enough spaces to make it {@code width} characters long, counted in code
+     * points; text already that long or longer comes back as it is. A column of names padded this way
+     * lines up whatever the names are written in: {@code padEnd("gds", 6)} is {@code "gds   "}.
+     */
+    public static String padEnd(String text, int width) {
+        return text + " ".repeat(Math.max(0, width - length(text)));
+    }
+
     private static int bound(int position, int length) {
         return position < 0 ? Math.max(0, position + length) : Math.min(position, length);
     }

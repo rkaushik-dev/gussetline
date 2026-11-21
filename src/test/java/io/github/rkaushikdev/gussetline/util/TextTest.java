@@ -84,6 +84,14 @@ class TextTest {
     }
 
     @Test
+    void paddingCountsCodePointsAndNeverCutsALongerText() {
+        assertThat(Text.padEnd("gds", 6)).isEqualTo("gds   ");
+        assertThat(Text.padEnd("x😀y", 5)).isEqualTo("x😀y  ");
+        assertThat(Text.padEnd("calendar", 4)).isEqualTo("calendar");
+        assertThat(Text.padEnd("", 2)).isEqualTo("  ");
+    }
+
+    @Test
     void aSliceCountsANegativePositionBackFromTheEnd() {
         assertThat(Text.slice("F1KL", -2, 4)).isEqualTo("KL");
         assertThat(Text.slice("F1KL", 0, -1)).isEqualTo("F1K");

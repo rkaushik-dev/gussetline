@@ -73,6 +73,14 @@ class CliSeedTest {
     }
 
     @Test
+    void aSeededDeskRaisesARecommendationOnTheFirstNight() {
+        // The whole reason the readings end in a drop that holds.
+        runner.run("seed", "--on", TODAY);
+        Shell.Result reply = runner.run("night", "--on", TODAY);
+        assertThat(reply.output()).contains("raised 2");
+    }
+
+    @Test
     void aDeskThatAlreadyHoldsSomethingIsLeftAlone() {
         // Invented fares next to filed ones with nothing to tell them apart.
         runner.run("seed", "--on", TODAY);

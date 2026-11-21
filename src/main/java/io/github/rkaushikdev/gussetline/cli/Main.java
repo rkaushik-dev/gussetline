@@ -53,6 +53,7 @@ import picocli.CommandLine.ParseResult;
             CollectCommands.Collect.class,
             Main.CreateSchema.class,
             LoadCommands.Load.class,
+            NightCommand.class,
             PriceCommand.class,
             SeedCommand.class,
             Main.ShowSettings.class,

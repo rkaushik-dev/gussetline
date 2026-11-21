@@ -49,6 +49,7 @@ import picocli.CommandLine.ParseResult;
         description = "Fare audit and reprice desk.",
         subcommands = {
             Main.CheckDesk.class,
+            CollectCommands.Collect.class,
             Main.CreateSchema.class,
             LoadCommands.Load.class,
             Main.ShowSettings.class,
@@ -84,12 +85,15 @@ public final class Main {
      * @throws RuntimeException whatever a command threw that is neither a usage error nor a refusal
      */
     public static int run(Terminal terminal, String... args) {
-        return execute(terminal, args).code();
+        return execute(terminal, Wiring.standard(), args).code();
     }
 
-    /** {@link #run}, also handing back the refusal the code was chosen for, when there was one. */
-    static Finished execute(Terminal terminal, String... args) {
-        Desk desk = new Desk(terminal);
+    /**
+     * {@link #run} with the commands reaching outside the process through {@code wiring}, also handing
+     * back the refusal the code was chosen for, when there was one.
+     */
+    static Finished execute(Terminal terminal, Wiring wiring, String... args) {
+        Desk desk = new Desk(terminal, wiring);
         Main main = new Main(desk);
         CommandLine line = new CommandLine(main, new Commands(desk))
                 .setExpandAtFiles(false)

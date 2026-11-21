@@ -44,12 +44,14 @@ final class Desk implements AutoCloseable {
             List.of(NotFoundError.class, ValidationError.class, TariffError.class, ConfigError.class);
 
     private final Terminal terminal;
+    private final Wiring wiring;
     private Settings settings;
     private boolean quiet;
     private Database database;
 
-    Desk(Terminal terminal) {
+    Desk(Terminal terminal, Wiring wiring) {
         this.terminal = Objects.requireNonNull(terminal, "terminal");
+        this.wiring = Objects.requireNonNull(wiring, "wiring");
     }
 
     /**
@@ -96,6 +98,11 @@ final class Desk implements AutoCloseable {
     /** The streams and the environment the run was started with. */
     Terminal terminal() {
         return terminal;
+    }
+
+    /** Where the commands reach outside the process. */
+    Wiring wiring() {
+        return wiring;
     }
 
     /** Report a line, unless the run was told to be quiet. */

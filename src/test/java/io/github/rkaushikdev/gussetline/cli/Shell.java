@@ -22,20 +22,27 @@ import java.util.Optional;
 final class Shell {
 
     private final Map<String, String> environment;
+    private final Wiring wiring;
 
     Shell() {
-        this(Map.of());
+        this(Map.of(), Wiring.standard());
     }
 
-    private Shell(Map<String, String> environment) {
+    private Shell(Map<String, String> environment, Wiring wiring) {
         this.environment = Map.copyOf(environment);
+        this.wiring = wiring;
     }
 
     /** The same shell with one more variable exported, replacing any value it had. */
     Shell exporting(String name, String value) {
         Map<String, String> more = new LinkedHashMap<>(environment);
         more.put(name, value);
-        return new Shell(more);
+        return new Shell(more, wiring);
+    }
+
+    /** The same shell with the commands reaching outside the process through {@code other}. */
+    Shell wiredWith(Wiring other) {
+        return new Shell(environment, other);
     }
 
     /** Run one command line. */
@@ -49,7 +56,7 @@ final class Shell {
                 new PrintWriter(new Both(out, both), true),
                 new PrintWriter(new Both(err, both), true));
         try {
-            Main.Finished finished = Main.execute(terminal, args);
+            Main.Finished finished = Main.execute(terminal, wiring, args);
             return new Result(finished.code(), out.toString(), err.toString(), both.toString(), finished.refusal());
         } catch (RuntimeException crashed) {
             return new Result(1, out.toString(), err.toString(), both.toString(), Optional.of(crashed));

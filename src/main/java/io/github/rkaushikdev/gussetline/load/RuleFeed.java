@@ -93,9 +93,12 @@ public final class RuleFeed {
             optional("ticketing_after", 6, 3, Kind.INT),
             optional("ticketing_before", 9, 3, Kind.INT));
 
-    /** Category 6: a number of nights, or a weekday the stay has to cross. */
-    public static final RecordSpec MINIMUM =
-            new RecordSpec("R06", optional("days", 3, 3, Kind.INT), optional("weekday", 6, 3, Kind.TEXT));
+    /** Category 6: a number of nights, a weekday the stay has to cross, and a number of months. */
+    public static final RecordSpec MINIMUM = new RecordSpec(
+            "R06",
+            optional("days", 3, 3, Kind.INT),
+            optional("weekday", 6, 3, Kind.TEXT),
+            optional("months", 9, 2, Kind.INT));
 
     /** Category 7: days, months, and a {@code Y} when the limit runs from the turnaround. */
     public static final RecordSpec MAXIMUM = new RecordSpec(
@@ -301,7 +304,7 @@ public final class RuleFeed {
                         .ticketingDaysAfterReservation(number(record, "ticketing_after"))
                         .ticketingDaysBeforeDeparture(number(record, "ticketing_before"))
                         .build();
-            case "R06" -> new MinimumStay(number(record, "days"), text(record, "weekday"));
+            case "R06" -> new MinimumStay(number(record, "days"), text(record, "weekday"), number(record, "months"));
             case "R07" ->
                 MaximumStay.builder()
                         .days(number(record, "days"))

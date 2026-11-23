@@ -263,12 +263,13 @@ public final class Provisions {
 
     private static void minimumToRow(MinimumStay provision, ProvisionRow row) {
         row.setNumberOne(provision.days().orElse(null));
+        row.setNumberTwo(provision.months().orElse(null));
         row.setTextOne(provision.weekday().orElse(""));
     }
 
     private static MinimumStay minimumFromRow(ProvisionRow row) {
-        String weekday = row.getTextOne();
-        return new MinimumStay(row.getNumberOne(), weekday.isEmpty() ? Optional.empty() : Optional.of(weekday));
+        Optional<String> weekday = Optional.of(row.getTextOne()).filter(text -> !text.isEmpty());
+        return new MinimumStay(row.getNumberOne(), weekday, row.getNumberTwo());
     }
 
     private static void maximumToRow(MaximumStay provision, ProvisionRow row) {

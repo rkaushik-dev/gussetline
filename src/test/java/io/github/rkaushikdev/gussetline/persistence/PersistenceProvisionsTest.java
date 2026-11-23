@@ -34,6 +34,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -61,6 +62,8 @@ class PersistenceProvisionsTest {
             new InstantPurchase(),
             new MinimumStay(3),
             new MinimumStay("SUN"),
+            MinimumStay.ofMonths(1),
+            new MinimumStay(Optional.of(3), Optional.of("SUN"), Optional.of(2)),
             new MinimumStay(),
             MaximumStay.builder().days(30).build(),
             MaximumStay.builder().months(6).fromTurnaround(true).build(),

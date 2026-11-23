@@ -11,6 +11,7 @@ import io.github.rkaushikdev.gussetline.itinerary.Itinerary;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
 
 class RulesStayTest {
@@ -202,5 +203,57 @@ class RulesStayTest {
     void daysAndMonthsTogetherTakeTheLaterLimit() {
         MaximumStay rule = MaximumStay.builder().days(7).months(6).build();
         assertThat(rule.limitFrom(LocalDate.of(2025, 3, 4))).isEqualTo(LocalDate.of(2025, 9, 4));
+    }
+
+    /** Out to New York on the given day, home on the other, both late in the evening. */
+    private static Context away(String outOn, String homeOn) {
+        Itinerary trip = new Itinerary(List.of(
+                segment("LH", "400", "FRA", "JFK", outOn + " 10:25", outOn + " 13:05"),
+                segment(
+                        "LH",
+                        "401",
+                        "JFK",
+                        "FRA",
+                        homeOn + " 18:30",
+                        LocalDate.parse(homeOn).plusDays(1) + " 08:05")));
+        FareComponent first = new FareComponent(List.of(trip.segments().get(0)));
+        return new Context(trip, first, TICKETING);
+    }
+
+    @Test
+    void aMonthIsACalendarMonthAndNotThirtyDays() {
+        MinimumStay month = MinimumStay.ofMonths(1);
+        assertThat(month.evaluate(away("2025-03-04", "2025-04-03")).failed()).isTrue();
+        assertThat(month.evaluate(away("2025-03-04", "2025-04-04")).failed()).isFalse();
+        // Thirty one days from the first of March is the first of April; a month from the thirty
+        // first of January is the twenty eighth of February.
+        assertThat(month.evaluate(away("2025-01-31", "2025-02-28")).failed()).isFalse();
+        assertThat(month.evaluate(away("2025-01-31", "2025-02-27")).failed()).isTrue();
+    }
+
+    @Test
+    void aMonthThatFailsSaysWhenTheTripMayComeHome() {
+        Outcome outcome = MinimumStay.ofMonths(2).evaluate(away("2025-03-04", "2025-04-20"));
+        assertThat(outcome.failed()).isTrue();
+        assertThat(outcome.message()).isEqualTo("minimum stay is 2 months, so not home before 2025-05-04");
+        assertThat(outcome.details()).isEqualTo(Map.of("earliest", "2025-05-04", "home", "2025-04-20"));
+    }
+
+    @Test
+    void nightsAndMonthsFiledTogetherMustBothHold() {
+        MinimumStay both = new MinimumStay(Optional.of(40), Optional.empty(), Optional.of(1));
+        assertThat(both.evaluate(away("2025-03-04", "2025-04-05")).failed()).isTrue();
+        assertThat(both.evaluate(away("2025-03-04", "2025-04-14")).failed()).isFalse();
+        assertThat(both.isEmpty()).isFalse();
+    }
+
+    @Test
+    void aOneWayHasNoMonthsToMeasure() {
+        assertThat(MinimumStay.ofMonths(1).evaluate(oneWayContext()).failed()).isFalse();
+    }
+
+    @Test
+    void negativeMonthsAreRefused() {
+        assertThatThrownBy(() -> MinimumStay.ofMonths(-1)).isInstanceOf(ValidationError.class);
     }
 }

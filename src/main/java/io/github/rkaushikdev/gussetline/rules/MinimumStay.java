@@ -12,35 +12,54 @@ import java.util.Objects;
 import java.util.Optional;
 
 /**
- * Category 6: a number of nights, or a weekday the stay has to cross, or both, measured from the
- * arrival at the turnaround to the first departure home.
+ * Category 6: a number of nights, a number of calendar months, or a weekday the stay has to cross,
+ * measured from the arrival at the turnaround to the first departure home.
  *
  * <p>A weekday is not a number of days: a filing of Sunday wants the passenger away over a Sunday,
- * however short the trip. With both filed, both have to hold. A one way has no stay to measure and
- * passes.
+ * however short the trip. Nor is a month thirty days: a month from the thirty first of January is
+ * the twenty eighth of February, and from the first of February it is the first of March, which is
+ * the same rule asking for three fewer nights. Whatever is filed has to hold. A one way has no stay
+ * to measure and passes.
  *
  * @param days the fewest nights, when filed
  * @param weekday the weekday the stay has to cross, as filed, when filed
+ * @param months the fewest calendar months, when filed
  */
-public record MinimumStay(Optional<Integer> days, Optional<String> weekday) implements Provision {
+public record MinimumStay(Optional<Integer> days, Optional<String> weekday, Optional<Integer> months)
+        implements Provision {
 
     /**
      * Checks what is filed.
      *
-     * @throws ValidationError when the days are negative, or the weekday is not a day of the week
+     * @throws ValidationError when the days or the months are negative, or the weekday is not a day of
+     *     the week
      */
     public MinimumStay {
         Objects.requireNonNull(days, "days");
         Objects.requireNonNull(weekday, "weekday");
+        Objects.requireNonNull(months, "months");
         if (days.isPresent() && days.get() < 0) {
             throw new ValidationError("a minimum stay is not negative", Details.of("days", days.get()));
         }
+        if (months.isPresent() && months.get() < 0) {
+            throw new ValidationError("a minimum stay is not negative", Details.of("months", months.get()));
+        }
         weekday.ifPresent(Stay::weekdayIndex);
+    }
+
+    /** Nights or a weekday or both, and no months. */
+    public MinimumStay(Optional<Integer> days, Optional<String> weekday) {
+        this(days, weekday, Optional.empty());
     }
 
     /** Nothing filed. */
     public MinimumStay() {
         this(Optional.empty(), Optional.empty());
+    }
+
+    /** A number of calendar months alone. */
+    public static MinimumStay ofMonths(int months) {
+        return new MinimumStay(Optional.empty(), Optional.empty(), Optional.of(months));
     }
 
     /** A number of nights alone. */
@@ -65,7 +84,7 @@ public record MinimumStay(Optional<Integer> days, Optional<String> weekday) impl
 
     /** Whether nothing is filed. */
     public boolean isEmpty() {
-        return days.isEmpty() && weekday.isEmpty();
+        return days.isEmpty() && weekday.isEmpty() && months.isEmpty();
     }
 
     @Override
@@ -90,6 +109,20 @@ public record MinimumStay(Optional<Integer> days, Optional<String> weekday) impl
                     category(),
                     "minimum stay is " + days.get() + " nights and the trip is " + stayed,
                     Details.of("needed", days.get(), "had", stayed));
+        }
+
+        if (months.isPresent()) {
+            LocalDate earliest = arrived.get().plusMonths(months.get());
+            if (home.get().isBefore(earliest)) {
+                return fails(
+                        category(),
+                        "minimum stay is " + months.get() + " months, so not home before " + earliest,
+                        Details.of(
+                                "earliest",
+                                earliest.toString(),
+                                "home",
+                                home.get().toString()));
+            }
         }
 
         if (weekday.isPresent()) {

@@ -144,6 +144,15 @@ class LoadRulesTest {
     }
 
     @Test
+    void aMinimumStayCanBeFiledInMonths() {
+        RuleLoad load =
+                read(fileOf(head(), minimum().with("months", 1), minimum().with("days", 3)));
+        List<Provision> filed = load.rules().get(0).forCategory(Category.MINIMUM_STAY);
+        assertThat(filed).containsExactly(MinimumStay.ofMonths(1), new MinimumStay(3));
+        assertThat(load.problems()).isEmpty();
+    }
+
+    @Test
     void aSecondHeaderClosesTheFirstRule() {
         RuleLoad load = read(fileOf(
                 head().with("number", "0100"),

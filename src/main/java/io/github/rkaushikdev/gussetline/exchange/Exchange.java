@@ -1,11 +1,10 @@
 package io.github.rkaushikdev.gussetline.exchange;
 
-import static java.util.Map.entry;
-
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.UncheckedIOException;
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
-import java.util.Collections;
-import java.util.LinkedHashMap;
-import java.util.Map;
 
 /**
  * Rates of exchange, and the two of them that are not the same rate.
@@ -31,97 +30,28 @@ public final class Exchange {
         return LocalDate.of(on.getYear(), month, 1);
     }
 
+    /** Where the shipped rates of exchange are kept, next to this class. */
+    public static final String SHIPPED_ROE = "roe.csv";
+
     /**
-     * The rates the desk ships with, one quarter per block, named {@code roe}.
+     * The rates the desk ships with, one quarter per block, named {@code roe}, read from {@link
+     * #SHIPPED_ROE} ({@link RateTable#read}).
      *
-     * <p>These are the published IATA rates for the currencies the desk sells in. They are kept in
-     * the code rather than fetched because a quarter that fails to download must not silently price
-     * at last quarter's rate.
+     * <p>These are the published IATA rates for the currencies the desk sells in. They ship with the
+     * build rather than being fetched because a quarter that fails to download must not silently
+     * price at last quarter's rate, and they are kept as the rate file IATA publishes rather than as
+     * code so a new quarter is a new block of rows and nothing else.
+     *
+     * @throws IllegalStateException when the build was made without the file
      */
     public static RateTable defaultRoeTable() {
-        RateTable table = new RateTable("roe");
-        table.addMany(
-                LocalDate.of(2024, 10, 1),
-                rates(
-                        entry("EUR", "0.913"),
-                        entry("USD", "1.000"),
-                        entry("GBP", "0.766"),
-                        entry("CHF", "0.859"),
-                        entry("SEK", "10.401"),
-                        entry("NOK", "10.686"),
-                        entry("DKK", "6.812"),
-                        entry("PLN", "3.926"),
-                        entry("CZK", "22.938"),
-                        entry("HUF", "364.42"),
-                        entry("JPY", "146.86"),
-                        entry("KRW", "1329.62"),
-                        entry("CNY", "7.099"),
-                        entry("INR", "83.92"),
-                        entry("CAD", "1.354"),
-                        entry("AUD", "1.478"),
-                        entry("SGD", "1.301"),
-                        entry("HKD", "7.783"),
-                        entry("AED", "3.673"),
-                        entry("THB", "33.42"),
-                        entry("TRY", "34.11")));
-        table.addMany(
-                LocalDate.of(2025, 1, 1),
-                rates(
-                        entry("EUR", "0.951"),
-                        entry("USD", "1.000"),
-                        entry("GBP", "0.789"),
-                        entry("CHF", "0.896"),
-                        entry("SEK", "10.968"),
-                        entry("NOK", "11.163"),
-                        entry("DKK", "7.093"),
-                        entry("PLN", "4.070"),
-                        entry("CZK", "23.902"),
-                        entry("HUF", "391.66"),
-                        entry("JPY", "152.44"),
-                        entry("KRW", "1421.09"),
-                        entry("CNY", "7.264"),
-                        entry("INR", "84.71"),
-                        entry("CAD", "1.416"),
-                        entry("AUD", "1.575"),
-                        entry("SGD", "1.348"),
-                        entry("HKD", "7.775"),
-                        entry("AED", "3.673"),
-                        entry("THB", "34.16"),
-                        entry("TRY", "35.29")));
-        table.addMany(
-                LocalDate.of(2025, 4, 1),
-                rates(
-                        entry("EUR", "0.924"),
-                        entry("USD", "1.000"),
-                        entry("GBP", "0.774"),
-                        entry("CHF", "0.883"),
-                        entry("SEK", "10.045"),
-                        entry("NOK", "10.501"),
-                        entry("DKK", "6.892"),
-                        entry("PLN", "3.869"),
-                        entry("CZK", "23.117"),
-                        entry("HUF", "371.05"),
-                        entry("JPY", "149.51"),
-                        entry("KRW", "1461.32"),
-                        entry("CNY", "7.257"),
-                        entry("INR", "85.52"),
-                        entry("CAD", "1.437"),
-                        entry("AUD", "1.594"),
-                        entry("SGD", "1.343"),
-                        entry("HKD", "7.777"),
-                        entry("AED", "3.673"),
-                        entry("THB", "34.03"),
-                        entry("TRY", "37.92")));
-        return table;
-    }
-
-    /** Codes and their rates, kept in the order written. */
-    @SafeVarargs
-    private static Map<String, String> rates(Map.Entry<String, String>... rows) {
-        Map<String, String> quarter = new LinkedHashMap<>();
-        for (Map.Entry<String, String> row : rows) {
-            quarter.put(row.getKey(), row.getValue());
+        try (InputStream shipped = Exchange.class.getResourceAsStream(SHIPPED_ROE)) {
+            if (shipped == null) {
+                throw new IllegalStateException("the shipped rates of exchange are missing from the build");
+            }
+            return RateTable.read("roe", new String(shipped.readAllBytes(), StandardCharsets.UTF_8));
+        } catch (IOException unreadable) {
+            throw new UncheckedIOException(unreadable);
         }
-        return Collections.unmodifiableMap(quarter);
     }
 }

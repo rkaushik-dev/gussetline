@@ -4,8 +4,11 @@ import io.github.rkaushikdev.gussetline.Details;
 import io.github.rkaushikdev.gussetline.ValidationError;
 import io.github.rkaushikdev.gussetline.money.Currency;
 import io.github.rkaushikdev.gussetline.util.Numbers;
+import io.github.rkaushikdev.gussetline.util.Text;
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.time.format.DateTimeParseException;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -62,6 +65,74 @@ public final class RateTable {
     /** Hold one quarter's rates for several currencies, each written as decimal text. */
     public void addMany(LocalDate effective, Map<String, String> rates) {
         rates.forEach((code, value) -> add(code, effective, value));
+    }
+
+    /** The heading a rate file opens with, after any comment lines. */
+    public static final String HEADING = "effective,code,units_per_nuc";
+
+    /**
+     * A table read from a rate file: a heading of {@link #HEADING}, then one rate per line as {@code
+     * 2025-01-01,EUR,0.951}. Blank lines and lines starting with {@code #} are skipped, and white
+     * space around a field is ignored.
+     *
+     * <p>Refused whole rather than read in part, because a table that silently lost one currency
+     * prices every fare in it at whatever rate came before, which is a quarter out of date and looks
+     * right.
+     *
+     * @throws ValidationError naming the {@code line} when the heading is missing, a line does not
+     *     have three fields, a date or a rate does not read, a code is not a currency the desk sells
+     *     in, or a currency is listed twice for one date
+     */
+    public static RateTable read(String name, String text) {
+        RateTable table = new RateTable(name);
+        boolean headed = false;
+        String[] lines = text.split("\\R", -1);
+        for (int index = 0; index < lines.length; index++) {
+            String line = Text.strip(lines[index]);
+            int number = index + 1;
+            if (line.isEmpty() || line.startsWith("#")) {
+                continue;
+            }
+            if (!headed) {
+                if (!line.equals(HEADING)) {
+                    throw new ValidationError("a rate file opens with its heading", Details.of("line", number));
+                }
+                headed = true;
+                continue;
+            }
+            table.addLine(line, number);
+        }
+        if (!headed) {
+            throw new ValidationError("a rate file opens with its heading", Details.of("line", lines.length));
+        }
+        return table;
+    }
+
+    private void addLine(String line, int number) {
+        List<String> fields =
+                Arrays.stream(line.split(",", -1)).map(Text::strip).toList();
+        if (fields.size() != 3) {
+            throw new ValidationError("a rate line has three fields", Details.of("line", number));
+        }
+        LocalDate effective;
+        try {
+            effective = LocalDate.parse(fields.get(0));
+        } catch (DateTimeParseException unreadable) {
+            throw new ValidationError("not a date", Details.of("line", number, "value", fields.get(0)));
+        }
+        String code = fields.get(1).toUpperCase(Locale.ROOT);
+        NavigableMap<LocalDate, Rate> held = byCode.get(code);
+        if (held != null && held.containsKey(effective)) {
+            throw new ValidationError(
+                    "a currency is listed twice for one date", Details.of("line", number, "code", code));
+        }
+        try {
+            add(code, effective, fields.get(2));
+        } catch (NumberFormatException unreadable) {
+            throw new ValidationError("not a rate", Details.of("line", number, "value", fields.get(2)));
+        } catch (ValidationError refused) {
+            throw new ValidationError(refused.message(), Details.of("line", number, "code", code));
+        }
     }
 
     /** The codes the table holds a rate for, sorted. */

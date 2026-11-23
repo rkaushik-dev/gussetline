@@ -8,6 +8,7 @@ import io.github.rkaushikdev.gussetline.ValidationError;
 import io.github.rkaushikdev.gussetline.money.Money;
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
@@ -158,5 +159,71 @@ class ExchangeTest {
         assertThat(roe.rateFor("EUR", LocalDate.of(2025, 2, 5))).isEqualByComparingTo("0.951");
         assertThat(roe.rateFor("EUR", LocalDate.of(2025, 6, 5))).isEqualByComparingTo("0.924");
         assertThat(roe.rateFor("USD", LocalDate.of(2025, 6, 5))).isEqualByComparingTo("1.000");
+    }
+
+    private static final String HEAD = RateTable.HEADING + "\n";
+
+    @Test
+    void aRateFileIsReadQuarterByQuarter() {
+        RateTable table = RateTable.read(
+                "roe",
+                "# first quarter of 2025\n\n" + HEAD
+                        + "2025-01-01,EUR,0.951\n 2025-04-01 , eur , 0.924 \n2025-01-01,GBP,0.789\n");
+        assertThat(table.name()).isEqualTo("roe");
+        assertThat(table.codes()).containsExactly("EUR", "GBP");
+        assertThat(table.rateFor("EUR", LocalDate.of(2025, 2, 1))).isEqualByComparingTo("0.951");
+        assertThat(table.rateFor("EUR", LocalDate.of(2025, 5, 1))).isEqualByComparingTo("0.924");
+    }
+
+    @Test
+    void aRateFileWithoutItsHeadingIsRefused() {
+        assertThatThrownBy(() -> RateTable.read("roe", "2025-01-01,EUR,0.951\n"))
+                .isInstanceOf(ValidationError.class)
+                .hasMessageContaining("heading");
+        assertThatThrownBy(() -> RateTable.read("roe", "# nothing here\n"))
+                .isInstanceOf(ValidationError.class)
+                .hasMessageContaining("heading");
+    }
+
+    @ParameterizedTest
+    @CsvSource(
+            delimiter = '|',
+            value = {
+                "2025-01-01,EUR|a rate line has three fields",
+                "2025-01-01,EUR,0.951,extra|a rate line has three fields",
+                "2025-13-01,EUR,0.951|not a date",
+                "2025-01-01,EUR,cheap|not a rate",
+                "2025-01-01,QQQ,1.000|unknown currency",
+                "2025-01-01,EUR,0|positive"
+            })
+    void aBadRateLineIsRefusedNamingItsLine(String line, String reason) {
+        ValidationError refused = catchThrowableOfType(
+                ValidationError.class, () -> RateTable.read("roe", HEAD + "2025-01-01,USD,1.000\n" + line + "\n"));
+        assertThat(refused).hasMessageContaining(reason);
+        assertThat(refused.details()).containsEntry("line", 3);
+    }
+
+    @Test
+    void aCurrencyListedTwiceForOneDateIsRefused() {
+        ValidationError refused = catchThrowableOfType(
+                ValidationError.class,
+                () -> RateTable.read("roe", HEAD + "2025-01-01,EUR,0.951\n2025-01-01,EUR,0.952\n"));
+        assertThat(refused).hasMessageContaining("listed twice");
+        assertThat(refused.details()).containsEntry("code", "EUR").containsEntry("line", 3);
+    }
+
+    @Test
+    void theShippedFileHoldsEveryCurrencyInEveryQuarter() {
+        RateTable roe = Exchange.defaultRoeTable();
+        assertThat(roe.codes()).hasSize(21);
+        for (LocalDate quarter :
+                List.of(LocalDate.of(2024, 10, 1), LocalDate.of(2025, 1, 1), LocalDate.of(2025, 4, 1))) {
+            for (String code : roe.codes()) {
+                assertThat(roe.lookup(code, quarter).effective())
+                        .as(code + " " + quarter)
+                        .isEqualTo(quarter);
+            }
+        }
+        assertThat(roe.rateFor("JPY", LocalDate.of(2025, 4, 1))).isEqualByComparingTo("149.51");
     }
 }

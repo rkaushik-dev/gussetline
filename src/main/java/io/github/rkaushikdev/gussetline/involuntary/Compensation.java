@@ -9,7 +9,7 @@ import java.util.Objects;
 /**
  * What the regulation owes a disrupted passenger on top of anything refunded, and why.
  *
- * @param amount the flat amount owed, in euro; zero when nothing is owed
+ * @param amount the flat amount owed, in the governing law's currency; zero when nothing is owed
  * @param kilometres the great circle the band was read from
  * @param reasons why the amount is what it is, in the order the rules were read
  */
@@ -28,9 +28,14 @@ public record Compensation(Money amount, int kilometres, List<String> reasons) {
         }
     }
 
-    /** Nothing owed, for one reason. */
+    /** Nothing owed under either law, for one reason, in euro. */
     public static Compensation none(int kilometres, String reason) {
         return new Compensation(Money.zero("EUR"), kilometres, List.of(reason));
+    }
+
+    /** Nothing owed under a law, for one reason, in that law's currency. */
+    public static Compensation none(Regime regime, int kilometres, String reason) {
+        return new Compensation(Money.zero(regime.currency()), kilometres, List.of(reason));
     }
 
     /** Whether anything is owed. */

@@ -53,7 +53,8 @@ class Eu261Test {
         Compensation owed = Eu261.assess(frankfurtNewYork(), cancelled(0, 5));
         assertThat(owed.amount()).isEqualTo(eur("600"));
         assertThat(owed.owed()).isTrue();
-        assertThat(owed.reasons().get(0)).startsWith("long haul");
+        assertThat(owed.reasons().get(0))
+                .isEqualTo("EU 261, long haul, " + Eu261.kilometres(frankfurtNewYork()) + " km");
     }
 
     @Test
@@ -221,6 +222,73 @@ class Eu261Test {
         Involuntary made = Involuntary.assess(PAID, lower);
         assertThat(made.downgradeRefund()).isEqualTo(Money.zero("EUR"));
         assertThat(made.notes()).anyMatch(note -> note.contains("without a downgrade owed"));
+    }
+
+    private static Itinerary londonNewYork(String operator) {
+        return new Itinerary(List.of(segment("BA", "117", "LHR", "JFK", "2025-03-04 08:25", "2025-03-04 11:10")
+                .withOperatingCarrier(operator)));
+    }
+
+    private static Itinerary newYorkLondon(String operator) {
+        return new Itinerary(List.of(segment("BA", "112", "JFK", "LHR", "2025-03-18 18:30", "2025-03-19 06:30")
+                .withOperatingCarrier(operator)));
+    }
+
+    @Test
+    void aDepartureFromTheUnitedKingdomIsCompensatedInSterling() {
+        Compensation owed = Eu261.assess(londonNewYork("BA"), cancelled(0, 6));
+        assertThat(owed.amount()).isEqualTo(Money.of("520", "GBP"));
+        assertThat(owed.reasons().get(0)).startsWith("UK 261, long haul");
+        Itinerary hop =
+                new Itinerary(List.of(segment("LH", "901", "LHR", "FRA", "2025-03-04 09:00", "2025-03-04 11:35")));
+        assertThat(Eu261.assess(hop, cancelled(0, 6)).amount()).isEqualTo(Money.of("220", "GBP"));
+    }
+
+    @Test
+    void theDepartureDecidesTheLawWhoeverFlies() {
+        Itinerary intoLondon =
+                new Itinerary(List.of(segment("BA", "903", "FRA", "LHR", "2025-03-04 09:00", "2025-03-04 09:45")));
+        assertThat(Regime.governing(intoLondon)).contains(Regime.EU);
+        assertThat(Eu261.assess(intoLondon, cancelled(0, 6)).amount()).isEqualTo(eur("250"));
+        assertThat(Regime.governing(londonNewYork("UA"))).contains(Regime.UK);
+    }
+
+    @Test
+    void aBritishLawArrivalAcceptsACarrierLicensedInTheUnion() {
+        assertThat(Regime.governing(newYorkLondon("LH"))).contains(Regime.UK);
+        assertThat(Regime.governing(newYorkLondon("BA"))).contains(Regime.UK);
+        assertThat(Regime.governing(newYorkLondon("UA"))).isEmpty();
+        assertThat(Eu261.assess(newYorkLondon("LH"), cancelled(0, 8)).amount()).isEqualTo(Money.of("520", "GBP"));
+    }
+
+    @Test
+    void aEuropeanArrivalNoLongerAcceptsABritishCarrier() {
+        assertThat(Regime.governing(newYorkFrankfurt("BA"))).isEmpty();
+        assertThat(Eu261.assess(newYorkFrankfurt("BA"), cancelled(0, 8)).owed()).isFalse();
+    }
+
+    @Test
+    void nothingOwedUnderBritishLawIsNothingInSterling() {
+        Compensation storm = Eu261.assess(londonNewYork("BA"), cancelled(0, 8).withExtraordinary(true));
+        assertThat(storm.amount()).isEqualTo(Money.zero("GBP"));
+        assertThat(storm.amount().currency()).isEqualTo("GBP");
+    }
+
+    @Test
+    void bothLawsShareTheDowngradeShare() {
+        assertThat(Eu261.downgradeRefund(londonNewYork("BA"), Money.of("1000.00", "GBP")))
+                .contains(Money.of("750.00", "GBP"));
+    }
+
+    @Test
+    void eachLawNamesItsCurrencyAndItsStates() {
+        assertThat(Regime.EU.currency()).isEqualTo("EUR");
+        assertThat(Regime.UK.currency()).isEqualTo("GBP");
+        assertThat(Regime.UK.label()).isEqualTo("UK 261");
+        assertThat(Regime.EU.covers("CH")).isTrue();
+        assertThat(Regime.EU.covers("GB")).isFalse();
+        assertThat(Regime.UK.covers("GB")).isTrue();
+        assertThat(Regime.UK.covers("DE")).isFalse();
     }
 
     @Test

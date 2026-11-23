@@ -127,13 +127,14 @@ public record Involuntary(
     /**
      * Work out an involuntary reissue, which is mostly working out what is not owed.
      *
-     * <p>A move to a lower cabin owes the difference between the two only when the cause owes a
-     * downgrade refund; otherwise it is noted and owes nothing. A move up, or no move, owes nothing
+     * <p>A move to a lower cabin owes a refund only when the cause owes a downgrade refund; otherwise
+     * it is noted and owes nothing. The refund is the regulation's share of the ticket on a covered
+     * journey ({@link Eu261#downgradeRefund}) or the priced difference between the cabins. A move up, or no move, owes nothing
      * either way. When the journey is known, the compensation the regulation owes is assessed on it
      * ({@link Eu261#assess}) and noted when anything is owed.
      *
-     * @throws ValidationError when a downgrade is owed and no difference was priced, naming {@code was}
-     *     and {@code now}
+     * @throws ValidationError when a downgrade is owed, the regulation does not cover the journey and
+     *     no difference was priced, naming {@code was} and {@code now}
      */
     public static Involuntary assess(Money paid, Disruption disruption) {
         Cause cause = disruption.cause();
@@ -145,21 +146,35 @@ public record Involuntary(
         Money owed = Money.zero(paid.currency());
         Optional<Cabin> now = disruption.flown();
         if (now.isPresent() && now.get().rank() < was.rank()) {
-            Cabin lower = now.get();
-            if (!cause.owesADowngradeRefund()) {
-                notes.add("flown in " + lower.value() + " rather than " + was.value() + " without a downgrade owed");
-            } else if (disruption.cabinDifference().isEmpty()) {
-                throw new ValidationError(
-                        "a downgrade needs the difference between the two cabins",
-                        Details.of("was", was.value(), "now", lower.value()));
+            String move = was.value() + " to " + now.get().value();
+            if (cause.owesADowngradeRefund()) {
+                owed = downgrade(paid, disruption, was, now.get());
+                notes.add("downgraded from " + move);
             } else {
-                owed = disruption.cabinDifference().get();
-                notes.add("downgraded from " + was.value() + " to " + lower.value());
+                notes.add(
+                        "flown in " + now.get().value() + " rather than " + was.value() + " without a downgrade owed");
             }
         }
         Optional<Compensation> compensation = disruption.journey().map(journey -> Eu261.assess(journey, disruption));
         compensation.filter(Compensation::owed).ifPresent(found -> notes.add("compensation of " + found));
         return new Involuntary(paid, cause, disruption.taxes(), owed, notes, compensation);
+    }
+
+    /**
+     * What a downgrade refunds: the regulation's share of the ticket when it covers the journey, the
+     * priced difference between the cabins when it does not, and the larger of the two when both are
+     * known, because the regulation sets a floor and not a ceiling.
+     */
+    private static Money downgrade(Money paid, Disruption disruption, Cabin was, Cabin now) {
+        Optional<Money> share = disruption.journey().flatMap(journey -> Eu261.downgradeRefund(journey, paid));
+        Optional<Money> priced = disruption.cabinDifference();
+        if (share.isPresent() && priced.isPresent()) {
+            return priced.get().isGreaterThan(share.get()) ? priced.get() : share.get();
+        }
+        return share.or(() -> priced)
+                .orElseThrow(() -> new ValidationError(
+                        "a downgrade needs the difference between the two cabins",
+                        Details.of("was", was.value(), "now", now.value())));
     }
 
     /**

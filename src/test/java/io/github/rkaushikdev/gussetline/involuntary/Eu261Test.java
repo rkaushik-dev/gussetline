@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import io.github.rkaushikdev.gussetline.ValidationError;
+import io.github.rkaushikdev.gussetline.flights.Cabin;
 import io.github.rkaushikdev.gussetline.itinerary.Itinerary;
 import io.github.rkaushikdev.gussetline.money.Money;
 import java.time.Duration;
@@ -166,6 +167,60 @@ class Eu261Test {
         Involuntary made = Involuntary.assess(PAID, cancelled(20, 5).withJourney(frankfurtNewYork()));
         assertThat(made.compensation()).map(Compensation::owed).contains(false);
         assertThat(made.notes()).hasSize(2);
+    }
+
+    private static Disruption downgraded(Itinerary journey) {
+        return Disruption.of(Cause.DOWNGRADED)
+                .withMove(Cabin.BUSINESS, Cabin.ECONOMY)
+                .withJourney(journey);
+    }
+
+    @Test
+    void aCoveredDowngradeRefundsTheRegulationsShareOfTheTicket() {
+        assertThat(Eu261.downgradeRefund(frankfurtNewYork(), PAID)).contains(eur("630.00"));
+        assertThat(Eu261.downgradeRefund(frankfurtIstanbul(), PAID)).contains(eur("420.00"));
+        // Thirty percent of 333.33 is 99.999, and a refund never promises the fraction.
+        assertThat(Eu261.downgradeRefund(frankfurtLondon(), eur("333.33"))).contains(eur("99.99"));
+        assertThat(Eu261.downgradeRefund(newYorkFrankfurt("UA"), PAID)).isEmpty();
+    }
+
+    @Test
+    void aCoveredDowngradeNeedsNothingPriced() {
+        Involuntary made = Involuntary.assess(PAID, downgraded(frankfurtNewYork()));
+        assertThat(made.downgradeRefund()).isEqualTo(eur("630.00"));
+        assertThat(made.refund()).isEqualTo(eur("630.00"));
+        assertThat(made.notes()).contains("downgraded from C to Y");
+    }
+
+    @Test
+    void aPricedDifferenceLargerThanTheShareIsWhatComesBack() {
+        Involuntary made =
+                Involuntary.assess(PAID, downgraded(frankfurtNewYork()).withCabinDifference(eur("1200.00")));
+        assertThat(made.downgradeRefund()).isEqualTo(eur("1200.00"));
+        Involuntary smaller =
+                Involuntary.assess(PAID, downgraded(frankfurtNewYork()).withCabinDifference(eur("100.00")));
+        assertThat(smaller.downgradeRefund()).isEqualTo(eur("630.00"));
+    }
+
+    @Test
+    void anUncoveredDowngradeStillNeedsTheDifferencePriced() {
+        assertThatThrownBy(() -> Involuntary.assess(PAID, downgraded(newYorkFrankfurt("UA"))))
+                .isInstanceOf(ValidationError.class)
+                .hasMessageContaining("difference between the two cabins");
+        Involuntary priced =
+                Involuntary.assess(PAID, downgraded(newYorkFrankfurt("UA")).withCabinDifference(eur("250.00")));
+        assertThat(priced.downgradeRefund()).isEqualTo(eur("250.00"));
+    }
+
+    @Test
+    void aScheduleChangeIntoALowerCabinOwesNoShareEitherOnACoveredJourney() {
+        Disruption lower = Disruption.of(Cause.SCHEDULE_CHANGE)
+                .withMove(Cabin.BUSINESS, Cabin.ECONOMY)
+                .withJourney(frankfurtNewYork())
+                .withNotice(30);
+        Involuntary made = Involuntary.assess(PAID, lower);
+        assertThat(made.downgradeRefund()).isEqualTo(Money.zero("EUR"));
+        assertThat(made.notes()).anyMatch(note -> note.contains("without a downgrade owed"));
     }
 
     @Test

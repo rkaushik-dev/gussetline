@@ -9,6 +9,7 @@ import java.math.BigDecimal;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 
 /**
@@ -110,6 +111,23 @@ public final class Eu261 {
     }
 
     /**
+     * What Article 10 refunds a passenger flown in a lower cabin than booked: thirty, fifty or
+     * seventy five percent of what the ticket cost, by band, rounded down to the minor unit. Empty
+     * when the regulation does not cover the journey.
+     *
+     * <p>A share of the price paid and not the difference between two cabins, which is why it needs
+     * nothing priced: a business seat sold at a deep discount still refunds three quarters of what
+     * was paid for it on a long haul.
+     */
+    public static Optional<Money> downgradeRefund(Itinerary journey, Money paid) {
+        if (!covers(journey)) {
+            return Optional.empty();
+        }
+        BigDecimal share = band(kilometres(journey)).downgradeShare;
+        return Optional.of(Money.roundRefund(paid.times(share)));
+    }
+
+    /**
      * Whether the regulation reads this journey: it leaves a covered state, or it lands in one on a
      * carrier licensed in one. The carrier is whoever operates the first flown sector.
      */
@@ -140,18 +158,20 @@ public final class Eu261 {
 
     /** The three distance bands, each with its amount and the rerouting that halves it. */
     private enum Band {
-        SHORT("short haul", 250, 2),
-        MEDIUM("medium haul", 400, 3),
-        LONG("long haul", 600, 4);
+        SHORT("short haul", 250, 2, "0.30"),
+        MEDIUM("medium haul", 400, 3, "0.50"),
+        LONG("long haul", 600, 4, "0.75");
 
         private final String label;
         private final Money amount;
         private final Duration halvedWithin;
+        private final BigDecimal downgradeShare;
 
-        Band(String label, int euro, int hours) {
+        Band(String label, int euro, int hours, String share) {
             this.label = label;
             this.amount = Money.of(euro, "EUR");
             this.halvedWithin = Duration.ofHours(hours);
+            this.downgradeShare = new BigDecimal(share);
         }
     }
 }

@@ -10,10 +10,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import io.github.rkaushikdev.gussetline.ValidationError;
+import io.github.rkaushikdev.gussetline.discounts.Passenger;
+import io.github.rkaushikdev.gussetline.discounts.PassengerType;
 import io.github.rkaushikdev.gussetline.itinerary.Itinerary;
 import io.github.rkaushikdev.gussetline.money.Money;
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -262,25 +265,24 @@ class TaxesTest {
                 segment("UA", "300", "DEN", "SFO", "2025-03-05 12:00", "2025-03-05 13:00")));
     }
 
-    private static TaxRule facilityCharge() {
+    private static RuleBuilder facilityCharge() {
         return rule().code("XF")
                 .country("US")
                 .applies(Applies.PER_DEPARTURE)
                 .amount("4.50")
                 .exemptTransit(true)
-                .transitHours(4)
-                .build();
+                .transitHours(4);
     }
 
     @Test
     void aCappedChargeStopsAtItsCapOnAOneWay() {
         TaxTable table = new TaxTable();
-        table.add(facilityCharge().withMaxPerDirection(2));
+        table.add(facilityCharge().cap(2).build());
         assertThat(assess(hoppingWest(), Money.of("500", "EUR"), table))
                 .extracting(AppliedTax::point)
                 .containsExactly("ATL", "ORD");
         TaxTable uncapped = new TaxTable();
-        uncapped.add(facilityCharge());
+        uncapped.add(facilityCharge().build());
         assertThat(assess(hoppingWest(), Money.of("500", "EUR"), uncapped))
                 .extracting(AppliedTax::point)
                 .containsExactly("ATL", "ORD", "DEN");
@@ -294,12 +296,12 @@ class TaxesTest {
                 segment("UA", "201", "LAX", "DEN", "2025-03-09 07:00", "2025-03-09 10:00"),
                 segment("UA", "101", "DEN", "ORD", "2025-03-09 18:00", "2025-03-09 21:00")));
         TaxTable once = new TaxTable();
-        once.add(facilityCharge().withMaxPerDirection(1));
+        once.add(facilityCharge().cap(1).build());
         assertThat(assess(roundTrip, Money.of("500", "EUR"), once))
                 .extracting(AppliedTax::point)
                 .containsExactly("ORD", "LAX");
         TaxTable twice = new TaxTable();
-        twice.add(facilityCharge().withMaxPerDirection(2));
+        twice.add(facilityCharge().cap(2).build());
         assertThat(assess(roundTrip, Money.of("500", "EUR"), twice))
                 .extracting(AppliedTax::point)
                 .containsExactly("ORD", "DEN", "LAX", "DEN");
@@ -312,8 +314,8 @@ class TaxesTest {
                 .country("US")
                 .applies(Applies.PER_COUPON)
                 .amount("5.00")
-                .build()
-                .withMaxPerDirection(2));
+                .cap(2)
+                .build());
         assertThat(assess(hoppingWest(), Money.of("500", "EUR"), table))
                 .extracting(AppliedTax::point)
                 .containsExactly("ATL", "ORD");
@@ -321,20 +323,21 @@ class TaxesTest {
 
     @Test
     void aCapOfNothingIsRefused() {
-        assertThatThrownBy(() -> facilityCharge().withMaxPerDirection(0))
+        assertThatThrownBy(() -> facilityCharge().cap(0).build())
                 .isInstanceOf(ValidationError.class)
                 .hasMessageContaining("cap");
     }
 
     @Test
     void twoRulesWithDifferentCapsAreDifferentRules() {
-        assertThat(facilityCharge().withMaxPerDirection(2))
-                .isEqualTo(facilityCharge().withMaxPerDirection(2));
-        assertThat(facilityCharge().withMaxPerDirection(2))
-                .hasSameHashCodeAs(facilityCharge().withMaxPerDirection(2));
-        assertThat(facilityCharge().withMaxPerDirection(2)).isNotEqualTo(facilityCharge());
-        assertThat(facilityCharge().withMaxPerDirection(2))
-                .isNotEqualTo(facilityCharge().withMaxPerDirection(4));
+        assertThat(facilityCharge().cap(2).build())
+                .isEqualTo(facilityCharge().cap(2).build());
+        assertThat(facilityCharge().cap(2).build())
+                .hasSameHashCodeAs(facilityCharge().cap(2).build());
+        assertThat(facilityCharge().cap(2).build())
+                .isNotEqualTo(facilityCharge().build());
+        assertThat(facilityCharge().cap(2).build())
+                .isNotEqualTo(facilityCharge().cap(4).build());
     }
 
     @Test
@@ -346,6 +349,71 @@ class TaxesTest {
         assertThat(owed.stream().filter(tax -> tax.code().equals("ZP")))
                 .extracting(AppliedTax::point)
                 .containsExactly("ATL", "ORD", "DEN");
+    }
+
+    @Test
+    void aLapInfantIsSparedWhatTheRuleSparesAndOwesTheRest() {
+        TaxTable table = new TaxTable();
+        table.add(rule().spares(PassengerType.INFANT).build());
+        table.add(
+                rule().code("RA").applies(Applies.PER_DEPARTURE).amount("10.00").build());
+        List<AppliedTax> infant = assess(oneWay(), Money.of("500", "EUR"), table, new Passenger(PassengerType.INFANT));
+        assertThat(infant).extracting(AppliedTax::code).containsExactly("RA");
+        List<AppliedTax> adult = assess(oneWay(), Money.of("500", "EUR"), table);
+        assertThat(adult).extracting(AppliedTax::code).containsExactly("DE", "RA");
+    }
+
+    @Test
+    void anInfantInItsOwnSeatIsNotALapInfant() {
+        TaxTable table = new TaxTable();
+        table.add(rule().spares(PassengerType.INFANT).build());
+        assertThat(assess(oneWay(), Money.of("500", "EUR"), table, new Passenger(PassengerType.INFANT_WITH_SEAT)))
+                .extracting(AppliedTax::code)
+                .containsExactly("DE");
+    }
+
+    @Test
+    void aSparedPassengerDoesNotUseUpTheCap() {
+        TaxTable table = new TaxTable();
+        table.add(facilityCharge().cap(2).spares(PassengerType.INFANT).build());
+        assertThat(assess(hoppingWest(), Money.of("500", "EUR"), table, new Passenger(PassengerType.INFANT)))
+                .isEmpty();
+        assertThat(assess(hoppingWest(), Money.of("500", "EUR"), table, new Passenger(PassengerType.CHILD)))
+                .extracting(AppliedTax::point)
+                .containsExactly("ATL", "ORD");
+    }
+
+    @Test
+    void twoRulesSparingDifferentPassengersAreDifferentRules() {
+        assertThat(rule().spares(PassengerType.INFANT).build())
+                .isEqualTo(rule().spares(PassengerType.INFANT).build());
+        assertThat(rule().spares(PassengerType.INFANT).build())
+                .isNotEqualTo(rule().spares(PassengerType.CHILD).build());
+        assertThat(rule().spares(PassengerType.INFANT).build().spares(PassengerType.INFANT))
+                .isTrue();
+        assertThat(rule().build().spares(PassengerType.INFANT)).isFalse();
+    }
+
+    @Test
+    void aFilingWithNoAmountIsRefused() {
+        assertThatThrownBy(() -> TaxRule.builder("DE", "DE").build())
+                .isInstanceOf(NullPointerException.class)
+                .hasMessageContaining("amount");
+    }
+
+    @Test
+    void theShippedPassengerDutySparesAChildLeavingLondon() {
+        Itinerary london =
+                new Itinerary(List.of(segment("BA", "117", "LHR", "JFK", "2025-03-04 08:25", "2025-03-04 11:10")));
+        List<String> child =
+                assess(london, Money.of("500", "EUR"), defaultTaxTable(), new Passenger(PassengerType.CHILD)).stream()
+                        .map(AppliedTax::code)
+                        .toList();
+        assertThat(child).containsExactlyInAnyOrder("UB", "YQ");
+        List<String> adult = assess(london, Money.of("500", "EUR"), defaultTaxTable()).stream()
+                .map(AppliedTax::code)
+                .toList();
+        assertThat(adult).containsExactlyInAnyOrder("GB", "UB", "YQ");
     }
 
     @Test
@@ -445,6 +513,8 @@ class TaxesTest {
         private Applies applies = Applies.PER_INTERNATIONAL_DEPARTURE;
         private boolean exemptTransit;
         private int transitHours = TaxRule.DEFAULT_TRANSIT_HOURS;
+        private Optional<Integer> cap = Optional.empty();
+        private PassengerType[] spared = {};
 
         RuleBuilder code(String value) {
             code = value;
@@ -481,17 +551,27 @@ class TaxesTest {
             return this;
         }
 
+        RuleBuilder cap(int value) {
+            cap = Optional.of(value);
+            return this;
+        }
+
+        RuleBuilder spares(PassengerType... types) {
+            spared = types;
+            return this;
+        }
+
         TaxRule build() {
-            return new TaxRule(
-                    code,
-                    country,
-                    "German air transport tax",
-                    basis,
-                    amount,
-                    "EUR",
-                    applies,
-                    exemptTransit,
-                    transitHours);
+            TaxRule.Builder filed = TaxRule.builder(code, country)
+                    .description("German air transport tax")
+                    .amount(basis, amount, "EUR")
+                    .applies(applies)
+                    .spares(spared);
+            if (exemptTransit) {
+                filed.exemptTransit(transitHours);
+            }
+            cap.ifPresent(filed::maxPerDirection);
+            return filed.build();
         }
     }
 }

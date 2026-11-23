@@ -1,6 +1,8 @@
 package io.github.rkaushikdev.gussetline.taxes;
 
 import io.github.rkaushikdev.gussetline.ValidationError;
+import io.github.rkaushikdev.gussetline.discounts.Passenger;
+import io.github.rkaushikdev.gussetline.discounts.PassengerType;
 import io.github.rkaushikdev.gussetline.flights.Segment;
 import io.github.rkaushikdev.gussetline.geography.Geography;
 import io.github.rkaushikdev.gussetline.itinerary.Break;
@@ -75,7 +77,16 @@ public final class Taxes {
      * @throws ValidationError when the itinerary's breaks cannot be read
      */
     public static List<AppliedTax> assess(Itinerary itinerary, Money base, TaxTable table) {
-        Charges owed = new Charges(base, itinerary.turnaroundIndex());
+        return assess(itinerary, base, table, new Passenger(PassengerType.ADULT));
+    }
+
+    /**
+     * {@link #assess(Itinerary, Money, TaxTable)} for one traveller, leaving out every tax that
+     * spares their passenger type ({@link TaxRule#spares}). An infant on a lap enplanes nowhere in the
+     * sense a facility charge means and owes none of it, however many airports the parent passes.
+     */
+    public static List<AppliedTax> assess(Itinerary itinerary, Money base, TaxTable table, Passenger passenger) {
+        Charges owed = new Charges(base, itinerary.turnaroundIndex(), passenger.kind());
         List<Element> elements = itinerary.elements();
         List<Break> breaks = itinerary.breaks();
 
@@ -151,103 +162,72 @@ public final class Taxes {
     public static TaxTable defaultTaxTable() {
         TaxTable table = new TaxTable();
         table.addMany(List.of(
-                new TaxRule(
-                        "DE",
-                        "DE",
-                        "German air transport tax",
-                        Basis.FLAT,
-                        new BigDecimal("70.83"),
-                        "EUR",
-                        Applies.PER_INTERNATIONAL_DEPARTURE,
-                        true),
-                new TaxRule(
-                        "RA",
-                        "DE",
-                        "German security charge",
-                        Basis.FLAT,
-                        new BigDecimal("10.00"),
-                        "EUR",
-                        Applies.PER_DEPARTURE,
-                        true),
-                new TaxRule(
-                        "GB",
-                        "GB",
-                        "UK air passenger duty",
-                        Basis.FLAT,
-                        new BigDecimal("88.00"),
-                        "GBP",
-                        Applies.PER_INTERNATIONAL_DEPARTURE,
-                        true),
-                new TaxRule(
-                        "UB",
-                        "GB",
-                        "UK passenger service charge",
-                        Basis.FLAT,
-                        new BigDecimal("31.30"),
-                        "GBP",
-                        Applies.PER_DEPARTURE,
-                        true),
-                new TaxRule(
-                        "US",
-                        "US",
-                        "US transportation tax",
-                        Basis.PERCENT_OF_BASE,
-                        new BigDecimal("7.5"),
-                        "USD",
-                        Applies.PER_TICKET),
-                new TaxRule(
-                        "ZP",
-                        "US",
-                        "US flight segment tax",
-                        Basis.FLAT,
-                        new BigDecimal("5.00"),
-                        "USD",
-                        Applies.PER_COUPON),
-                new TaxRule(
-                                "XF",
-                                "US",
-                                "US passenger facility charge",
-                                Basis.FLAT,
-                                new BigDecimal("4.50"),
-                                "USD",
-                                Applies.PER_DEPARTURE,
-                                true,
-                                PFC_TRANSIT_HOURS)
-                        .withMaxPerDirection(PFC_PER_DIRECTION),
-                new TaxRule(
-                        "FR",
-                        "FR",
-                        "French civil aviation tax",
-                        Basis.FLAT,
-                        new BigDecimal("14.34"),
-                        "EUR",
-                        Applies.PER_INTERNATIONAL_DEPARTURE,
-                        true),
-                new TaxRule(
-                        "JP",
-                        "JP",
-                        "Japan international tourist tax",
-                        Basis.FLAT,
-                        new BigDecimal("1000"),
-                        "JPY",
-                        Applies.PER_INTERNATIONAL_DEPARTURE),
-                new TaxRule(
-                        "AE",
-                        "AE",
-                        "UAE passenger service charge",
-                        Basis.FLAT,
-                        new BigDecimal("75.00"),
-                        "AED",
-                        Applies.PER_DEPARTURE,
-                        true),
-                new TaxRule(
-                        "YQ",
-                        "ZZ",
-                        "Carrier imposed fuel surcharge",
-                        Basis.FLAT,
-                        new BigDecimal("180.00"),
-                        "EUR",
-                        Applies.PER_TICKET)));
+                TaxRule.builder("DE", "DE")
+                        .description("German air transport tax")
+                        .flat("70.83", "EUR")
+                        .applies(Applies.PER_INTERNATIONAL_DEPARTURE)
+                        .exemptTransit(true)
+                        .spares(PassengerType.INFANT)
+                        .build(),
+                TaxRule.builder("RA", "DE")
+                        .description("German security charge")
+                        .flat("10.00", "EUR")
+                        .applies(Applies.PER_DEPARTURE)
+                        .exemptTransit(true)
+                        .build(),
+                TaxRule.builder("GB", "GB")
+                        .description("UK air passenger duty")
+                        .flat("88.00", "GBP")
+                        .applies(Applies.PER_INTERNATIONAL_DEPARTURE)
+                        .exemptTransit(true)
+                        .spares(PassengerType.CHILD, PassengerType.INFANT, PassengerType.INFANT_WITH_SEAT)
+                        .build(),
+                TaxRule.builder("UB", "GB")
+                        .description("UK passenger service charge")
+                        .flat("31.30", "GBP")
+                        .applies(Applies.PER_DEPARTURE)
+                        .exemptTransit(true)
+                        .build(),
+                TaxRule.builder("US", "US")
+                        .description("US transportation tax")
+                        .percentOfBase("7.5", "USD")
+                        .build(),
+                TaxRule.builder("ZP", "US")
+                        .description("US flight segment tax")
+                        .flat("5.00", "USD")
+                        .applies(Applies.PER_COUPON)
+                        .spares(PassengerType.INFANT)
+                        .build(),
+                TaxRule.builder("XF", "US")
+                        .description("US passenger facility charge")
+                        .flat("4.50", "USD")
+                        .applies(Applies.PER_DEPARTURE)
+                        .exemptTransit(PFC_TRANSIT_HOURS)
+                        .maxPerDirection(PFC_PER_DIRECTION)
+                        .spares(PassengerType.INFANT)
+                        .build(),
+                TaxRule.builder("FR", "FR")
+                        .description("French civil aviation tax")
+                        .flat("14.34", "EUR")
+                        .applies(Applies.PER_INTERNATIONAL_DEPARTURE)
+                        .exemptTransit(true)
+                        .build(),
+                TaxRule.builder("JP", "JP")
+                        .description("Japan international tourist tax")
+                        .flat("1000", "JPY")
+                        .applies(Applies.PER_INTERNATIONAL_DEPARTURE)
+                        .spares(PassengerType.INFANT, PassengerType.INFANT_WITH_SEAT)
+                        .build(),
+                TaxRule.builder("AE", "AE")
+                        .description("UAE passenger service charge")
+                        .flat("75.00", "AED")
+                        .applies(Applies.PER_DEPARTURE)
+                        .exemptTransit(true)
+                        .build(),
+                TaxRule.builder("YQ", "ZZ")
+                        .description("Carrier imposed fuel surcharge")
+                        .flat("180.00", "EUR")
+                        .build()));
         return table;
     }
 
@@ -299,15 +279,20 @@ public final class Taxes {
 
         private final Money base;
         private final int turnaround;
+        private final PassengerType passenger;
         private final List<AppliedTax> owed = new ArrayList<>();
         private final Map<TaxRule, int[]> counted = new HashMap<>();
 
-        Charges(Money base, int turnaround) {
+        Charges(Money base, int turnaround, PassengerType passenger) {
             this.base = base;
             this.turnaround = turnaround;
+            this.passenger = passenger;
         }
 
         void charge(TaxRule rule, String point, int element) {
+            if (rule.spares(passenger)) {
+                return;
+            }
             int[] times = counted.computeIfAbsent(rule, unused -> new int[2]);
             int direction = element < turnaround ? 0 : 1;
             if (rule.maxPerDirection().isPresent()

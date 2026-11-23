@@ -1,14 +1,18 @@
 package io.github.rkaushikdev.gussetline.taxes;
 
 import io.github.rkaushikdev.gussetline.ValidationError;
+import io.github.rkaushikdev.gussetline.flights.Segment;
 import io.github.rkaushikdev.gussetline.geography.Geography;
+import io.github.rkaushikdev.gussetline.itinerary.Break;
 import io.github.rkaushikdev.gussetline.itinerary.Element;
 import io.github.rkaushikdev.gussetline.itinerary.Itinerary;
 import io.github.rkaushikdev.gussetline.money.Money;
 import io.github.rkaushikdev.gussetline.util.Numbers;
 import java.math.BigDecimal;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 
 /**
@@ -21,14 +25,22 @@ import java.util.Set;
  *
  * <p>The rule that produces most of the work here is the transit exemption. A departure tax is owed
  * by a passenger who departs, and a passenger who is only connecting is not departing in the sense
- * the tax means. So whether a country's tax applies depends on whether the break at that point was a
- * connection or a stopover, which is a reading of the clock made in the {@link Itinerary}. One rule
+ * the tax means. So whether a country's tax applies depends on how long the passenger was on the
+ * ground at that point, read against the transit break the country filed ({@link
+ * TaxRule#transitHours()}) rather than against the stopover line the fare uses. The two often
+ * disagree: a journey can stop over for the fare and still be in transit for the tax. One rule
  * deciding what another rule measures is the normal state of this class.
  */
 public final class Taxes {
 
     /** The two codes that are carrier money rather than government money. */
     public static final Set<String> CARRIER_IMPOSED = Set.of("YQ", "YR");
+
+    /**
+     * The longest wait at a United States airport that is still a connection for the facility charge.
+     * Longer than this and the passenger enplanes there again and pays it again.
+     */
+    public static final int PFC_TRANSIT_HOURS = 4;
 
     private static final BigDecimal HUNDRED = BigDecimal.valueOf(100);
 
@@ -39,7 +51,8 @@ public final class Taxes {
      *
      * <p>The itinerary is walked point by point rather than country by country, because a tax is owed
      * at a point and the same country can be entered twice on one journey and owe twice. Departure
-     * and arrival taxes come first, element by element; then the taxes owed once per ticket and once
+     * and arrival taxes come first, flown sector by flown sector, because nobody boards or lands on a
+     * surface sector; then the taxes owed once per ticket and once
      * per coupon in the country the journey starts in; then the carrier surcharges, at the origin.
      *
      * <p>A flat tax is charged in its filed currency and a percentage tax in the base fare's, each
@@ -52,35 +65,35 @@ public final class Taxes {
      */
     public static List<AppliedTax> assess(Itinerary itinerary, Money base, TaxTable table) {
         List<AppliedTax> owed = new ArrayList<>();
-        Set<String> stopovers = Set.copyOf(itinerary.stopovers());
-        Set<String> connections = Set.copyOf(itinerary.connections());
         List<Element> elements = itinerary.elements();
+        List<Break> breaks = itinerary.breaks();
 
         for (int index = 0; index < elements.size(); index++) {
             Element element = elements.get(index);
+            if (!(element instanceof Segment)) {
+                continue;
+            }
             String departing = element.origin();
             String arriving = element.destination();
-            boolean first = index == 0;
-            boolean last = index == elements.size() - 1;
+            Optional<Break> before = index == 0 ? Optional.empty() : flownBreak(elements, breaks, index - 1);
+            Optional<Break> after =
+                    index == elements.size() - 1 ? Optional.empty() : flownBreak(elements, breaks, index);
 
             for (TaxRule rule : table.forCountry(Geography.airportOrCityCountry(departing))) {
-                if (rule.applies() == Applies.PER_DEPARTURE) {
-                    if (!exempt(rule, departing, first, connections)) {
-                        owed.add(apply(rule, base, departing));
-                    }
-                } else if (rule.applies() == Applies.PER_INTERNATIONAL_DEPARTURE) {
-                    if (!Geography.sameCountry(departing, arriving) && !exempt(rule, departing, first, connections)) {
-                        owed.add(apply(rule, base, departing));
-                    }
+                boolean due =
+                        switch (rule.applies()) {
+                            case PER_DEPARTURE -> true;
+                            case PER_INTERNATIONAL_DEPARTURE -> !Geography.sameCountry(departing, arriving);
+                            default -> false;
+                        };
+                if (due && !inTransit(rule, before)) {
+                    owed.add(apply(rule, base, departing));
                 }
             }
 
             for (TaxRule rule : table.forCountry(Geography.airportOrCityCountry(arriving))) {
-                if (rule.applies() == Applies.PER_ARRIVAL) {
-                    boolean transiting = rule.exemptTransit() && !last && !stopovers.contains(arriving);
-                    if (!transiting) {
-                        owed.add(apply(rule, base, arriving));
-                    }
+                if (rule.applies() == Applies.PER_ARRIVAL && !inTransit(rule, after)) {
+                    owed.add(apply(rule, base, arriving));
                 }
             }
         }
@@ -191,7 +204,8 @@ public final class Taxes {
                         new BigDecimal("4.50"),
                         "USD",
                         Applies.PER_DEPARTURE,
-                        true),
+                        true,
+                        PFC_TRANSIT_HOURS),
                 new TaxRule(
                         "FR",
                         "FR",
@@ -229,15 +243,29 @@ public final class Taxes {
         return table;
     }
 
-    /** A connecting passenger does not depart in the sense a departure tax means. */
-    private static boolean exempt(TaxRule rule, String point, boolean first, Set<String> connections) {
-        if (!rule.exemptTransit()) {
-            return false;
+    /**
+     * Whether the passenger is only passing through under this rule's own transit break.
+     *
+     * <p>A connecting passenger does not depart or arrive in the sense the tax means. What counts as
+     * connecting is the hours the country filed, not the journey's stopover line: a tax that spares
+     * a twelve hour connection charges the same passenger on a fourteen hour one, even though the
+     * fare reads both as connections.
+     */
+    private static boolean inTransit(TaxRule rule, Optional<Break> ground) {
+        return rule.exemptTransit()
+                && ground.isPresent()
+                && ground.get().duration().compareTo(Duration.ofHours(rule.transitHours())) <= 0;
+    }
+
+    /**
+     * The break between an element and the next one, when both are flown. A surface sector is never a
+     * transit, whatever the clock says, so a break next to one comes back empty.
+     */
+    private static Optional<Break> flownBreak(List<Element> elements, List<Break> breaks, int index) {
+        if (elements.get(index) instanceof Segment && elements.get(index + 1) instanceof Segment) {
+            return Optional.of(breaks.get(index));
         }
-        if (first) {
-            return false;
-        }
-        return connections.contains(point);
+        return Optional.empty();
     }
 
     private static AppliedTax apply(TaxRule rule, Money base, String point) {

@@ -20,7 +20,9 @@ import java.util.regex.Pattern;
  * @param currency the currency of a flat amount
  * @param applies how many times it is charged
  * @param exemptTransit whether a connecting passenger is spared it
- * @param transitHours the longest break a passenger is still connecting through, in hours
+ * @param transitHours the longest break a passenger is still connecting through for this tax, in
+ *     hours; read in place of the journey's stopover line, so a country can spare a longer wait than
+ *     the fare does or a shorter one
  */
 public record TaxRule(
         String code,
@@ -43,7 +45,8 @@ public record TaxRule(
      * Normalises the code and the country to upper case without surrounding white space.
      *
      * @throws ValidationError naming the {@code code} when it is not two or three letters or digits,
-     *     when the amount is negative, or when a percentage is over a hundred
+     *     when the amount is negative, when a percentage is over a hundred, or when the transit break
+     *     is negative
      */
     public TaxRule {
         Objects.requireNonNull(description, "description");
@@ -61,6 +64,9 @@ public record TaxRule(
         }
         if (basis == Basis.PERCENT_OF_BASE && amount.compareTo(HUNDRED) > 0) {
             throw new ValidationError("a percentage tax over a hundred", Details.of("code", code));
+        }
+        if (transitHours < 0) {
+            throw new ValidationError("a transit break is not negative", Details.of("code", code));
         }
     }
 

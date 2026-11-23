@@ -1,6 +1,7 @@
 package io.github.rkaushikdev.gussetline.taxes;
 
 import static io.github.rkaushikdev.gussetline.Fixtures.segment;
+import static io.github.rkaushikdev.gussetline.Fixtures.surface;
 import static io.github.rkaushikdev.gussetline.taxes.Taxes.assess;
 import static io.github.rkaushikdev.gussetline.taxes.Taxes.carrierTotal;
 import static io.github.rkaushikdev.gussetline.taxes.Taxes.defaultTaxTable;
@@ -40,6 +41,13 @@ class TaxesTest {
         assertThatThrownBy(
                         () -> rule().basis(Basis.PERCENT_OF_BASE).amount("101").build())
                 .isInstanceOf(ValidationError.class);
+    }
+
+    @Test
+    void aNegativeTransitBreakIsRefused() {
+        assertThatThrownBy(() -> rule().exemptTransit(true).transitHours(-1).build())
+                .isInstanceOf(ValidationError.class)
+                .hasMessageContaining("transit break");
     }
 
     @Test
@@ -132,6 +140,118 @@ class TaxesTest {
         TaxTable table = new TaxTable();
         table.add(rule().exemptTransit(false).build());
         assertThat(assess(connecting(), Money.of("500", "EUR"), table)).hasSize(1);
+    }
+
+    @Test
+    void aTaxReadsItsOwnTransitBreakRatherThanTheStopoverLine() {
+        // Fourteen hours in Frankfurt is a connection for the fare, which draws its line at a day,
+        // and a departure for a tax that only spares twelve.
+        Itinerary overnight = new Itinerary(List.of(
+                segment("LH", "10", "MUC", "FRA", "2025-03-04 06:00", "2025-03-04 07:00"),
+                segment("LH", "400", "FRA", "JFK", "2025-03-04 21:00", "2025-03-04 23:40")));
+        assertThat(overnight.stopovers()).isEmpty();
+        TaxTable twelve = new TaxTable();
+        twelve.add(rule().exemptTransit(true).transitHours(12).build());
+        assertThat(assess(overnight, Money.of("500", "EUR"), twelve))
+                .extracting(AppliedTax::point)
+                .containsExactly("FRA");
+        TaxTable day = new TaxTable();
+        day.add(rule().exemptTransit(true).transitHours(24).build());
+        assertThat(assess(overnight, Money.of("500", "EUR"), day)).isEmpty();
+    }
+
+    @Test
+    void aDomesticStopoverForTheFareCanStillBeATransitForTheTax() {
+        Itinerary domestic = new Itinerary(List.of(
+                segment("UA", "100", "ORD", "DEN", "2025-03-04 06:00", "2025-03-04 08:00"),
+                segment("UA", "200", "DEN", "LAX", "2025-03-04 15:00", "2025-03-04 16:30")));
+        assertThat(domestic.stopovers()).containsExactly("DEN");
+        TaxTable table = new TaxTable();
+        table.add(rule().code("XF")
+                .country("US")
+                .applies(Applies.PER_DEPARTURE)
+                .amount("4.50")
+                .exemptTransit(true)
+                .transitHours(12)
+                .build());
+        assertThat(assess(domestic, Money.of("500", "EUR"), table))
+                .extracting(AppliedTax::point)
+                .containsExactly("ORD");
+    }
+
+    @Test
+    void aPointPassedTwiceIsReadAtEachVisit() {
+        // Frankfurt is a connection on the way out and a two night stop on the way home. The security
+        // charge is spared the first time and owed the second.
+        Itinerary twice = new Itinerary(List.of(
+                segment("LH", "10", "MUC", "FRA", "2025-03-04 06:00", "2025-03-04 07:00"),
+                segment("LH", "400", "FRA", "JFK", "2025-03-04 10:25", "2025-03-04 13:05"),
+                segment("LH", "401", "JFK", "FRA", "2025-03-18 18:30", "2025-03-19 08:05"),
+                segment("LH", "11", "FRA", "MUC", "2025-03-21 09:00", "2025-03-21 10:00")));
+        TaxTable table = new TaxTable();
+        table.add(rule().code("RA")
+                .applies(Applies.PER_DEPARTURE)
+                .amount("10.00")
+                .exemptTransit(true)
+                .build());
+        assertThat(assess(twice, Money.of("500", "EUR"), table))
+                .extracting(AppliedTax::point)
+                .containsExactly("MUC", "FRA");
+    }
+
+    @Test
+    void anArrivalTaxChargesAConnectionLongerThanItsTransitBreak() {
+        Itinerary through = new Itinerary(List.of(
+                segment("LH", "400", "FRA", "JFK", "2025-03-04 10:25", "2025-03-04 13:05"),
+                segment("UA", "300", "JFK", "LAX", "2025-03-04 19:30", "2025-03-04 22:45")));
+        TaxTable table = new TaxTable();
+        table.add(rule().code("XA")
+                .country("US")
+                .applies(Applies.PER_ARRIVAL)
+                .amount("7.00")
+                .exemptTransit(true)
+                .transitHours(4)
+                .build());
+        assertThat(assess(through, Money.of("500", "EUR"), table))
+                .extracting(AppliedTax::point)
+                .containsExactly("JFK", "LAX");
+        TaxTable longer = new TaxTable();
+        longer.add(rule().code("XA")
+                .country("US")
+                .applies(Applies.PER_ARRIVAL)
+                .amount("7.00")
+                .exemptTransit(true)
+                .transitHours(8)
+                .build());
+        assertThat(assess(through, Money.of("500", "EUR"), longer))
+                .extracting(AppliedTax::point)
+                .containsExactly("LAX");
+    }
+
+    @Test
+    void aSurfaceSectorIsNeitherBoardedNorATransit() {
+        Itinerary overland = new Itinerary(List.of(
+                segment("LH", "10", "MUC", "FRA", "2025-03-04 06:00", "2025-03-04 07:00"),
+                surface("FRA", "DUS"),
+                segment("LH", "400", "DUS", "JFK", "2025-03-04 10:25", "2025-03-04 13:05")));
+        TaxTable table = new TaxTable();
+        table.add(rule().code("RA")
+                .applies(Applies.PER_DEPARTURE)
+                .amount("10.00")
+                .exemptTransit(true)
+                .build());
+        assertThat(assess(overland, Money.of("500", "EUR"), table))
+                .extracting(AppliedTax::point)
+                .containsExactly("MUC", "DUS");
+    }
+
+    @Test
+    void theShippedFacilityChargeSparesOnlyAShortConnection() {
+        TaxRule pfc = defaultTaxTable().forCountry("US").stream()
+                .filter(rule -> rule.code().equals("XF"))
+                .findFirst()
+                .orElseThrow();
+        assertThat(pfc.transitHours()).isEqualTo(Taxes.PFC_TRANSIT_HOURS);
     }
 
     @Test
@@ -230,6 +350,7 @@ class TaxesTest {
         private BigDecimal amount = new BigDecimal("70.83");
         private Applies applies = Applies.PER_INTERNATIONAL_DEPARTURE;
         private boolean exemptTransit;
+        private int transitHours = TaxRule.DEFAULT_TRANSIT_HOURS;
 
         RuleBuilder code(String value) {
             code = value;
@@ -261,8 +382,22 @@ class TaxesTest {
             return this;
         }
 
+        RuleBuilder transitHours(int value) {
+            transitHours = value;
+            return this;
+        }
+
         TaxRule build() {
-            return new TaxRule(code, country, "German air transport tax", basis, amount, "EUR", applies, exemptTransit);
+            return new TaxRule(
+                    code,
+                    country,
+                    "German air transport tax",
+                    basis,
+                    amount,
+                    "EUR",
+                    applies,
+                    exemptTransit,
+                    transitHours);
         }
     }
 }

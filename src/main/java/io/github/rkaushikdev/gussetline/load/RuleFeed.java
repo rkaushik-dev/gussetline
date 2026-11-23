@@ -26,6 +26,7 @@ import io.github.rkaushikdev.gussetline.rules.RuleSet;
 import io.github.rkaushikdev.gussetline.rules.RuleStore;
 import io.github.rkaushikdev.gussetline.rules.SalesRestriction;
 import io.github.rkaushikdev.gussetline.rules.VoluntaryChange;
+import io.github.rkaushikdev.gussetline.timelimit.TicketingTerms.LateBooking;
 import io.github.rkaushikdev.gussetline.util.Text;
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -86,12 +87,17 @@ public final class RuleFeed {
             new Field("tariff", 9, 3),
             new Field("action", 12, 1));
 
-    /** Category 5: the reservation period, the hold, and the backstop, in days. */
+    /**
+     * Category 5: the reservation period, the hold, and the backstop, in days; then the late booking
+     * window and the hold a booking made inside it gets.
+     */
     public static final RecordSpec ADVANCE = new RecordSpec(
             "R05",
             optional("reservation_days", 3, 3, Kind.INT),
             optional("ticketing_after", 6, 3, Kind.INT),
-            optional("ticketing_before", 9, 3, Kind.INT));
+            optional("ticketing_before", 9, 3, Kind.INT),
+            optional("late_within", 12, 3, Kind.INT),
+            optional("late_ticket", 15, 3, Kind.INT));
 
     /** Category 6: a number of nights, a weekday the stay has to cross, and a number of months. */
     public static final RecordSpec MINIMUM = new RecordSpec(
@@ -304,6 +310,8 @@ public final class RuleFeed {
                         .reservationDays(number(record, "reservation_days"))
                         .ticketingDaysAfterReservation(number(record, "ticketing_after"))
                         .ticketingDaysBeforeDeparture(number(record, "ticketing_before"))
+                        .lateBooking(number(record, "late_within").flatMap(within -> number(record, "late_ticket")
+                                .map(hold -> new LateBooking(within, hold))))
                         .build();
             case "R06" -> new MinimumStay(number(record, "days"), text(record, "weekday"), number(record, "months"));
             case "R07" ->

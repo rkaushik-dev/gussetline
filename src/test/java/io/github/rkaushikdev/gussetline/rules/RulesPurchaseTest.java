@@ -7,6 +7,10 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import io.github.rkaushikdev.gussetline.ValidationError;
 import io.github.rkaushikdev.gussetline.components.FareComponent;
 import io.github.rkaushikdev.gussetline.itinerary.Itinerary;
+import io.github.rkaushikdev.gussetline.timelimit.Clock;
+import io.github.rkaushikdev.gussetline.timelimit.TicketingTerms;
+import io.github.rkaushikdev.gussetline.timelimit.TicketingTerms.LateBooking;
+import io.github.rkaushikdev.gussetline.timelimit.TimeLimit;
 import io.github.rkaushikdev.gussetline.trace.Stage;
 import io.github.rkaushikdev.gussetline.trace.Trace;
 import java.time.LocalDate;
@@ -183,5 +187,47 @@ class RulesPurchaseTest {
         assertThat(outcomes).hasSize(2);
         assertThat(Rules.permitted(outcomes)).isFalse();
         assertThat(trace.stageFailed(Stage.RULE)).isTrue();
+    }
+
+    @Test
+    void aLateBookingIsHeldOnlyAsLongAsTheLateRuleSays() {
+        // A seven day hold, but a booking within ten days of departure has to be paid the next day.
+        AdvancePurchase rule =
+                filing().ticketingDaysAfterReservation(7).lateBooking(10, 1).build();
+        assertThat(rule.ticketingDeadline(DEPARTURE, LocalDate.of(2025, 2, 25))).contains(LocalDate.of(2025, 2, 26));
+        assertThat(rule.ticketingDeadline(DEPARTURE, LocalDate.of(2025, 1, 10))).contains(LocalDate.of(2025, 1, 17));
+    }
+
+    @Test
+    void aLateBookingHoldNeedsTheBookingDate() {
+        AdvancePurchase rule = filing().lateBooking(10, 0).build();
+        assertThat(rule.isEmpty()).isFalse();
+        assertThat(rule.ticketingDeadline(DEPARTURE, Optional.empty())).isEmpty();
+        assertThat(rule.ticketingDeadline(DEPARTURE, LocalDate.of(2025, 3, 1))).contains(LocalDate.of(2025, 3, 1));
+    }
+
+    @Test
+    void aLateBookingSoldAfterItsHoldFails() {
+        AdvancePurchase rule =
+                filing().lateBooking(10, 0).bookedOn(LocalDate.of(2025, 2, 27)).build();
+        Outcome outcome = rule.evaluate(context(LocalDate.of(2025, 2, 28)));
+        assertThat(outcome.failed()).isTrue();
+        assertThat(outcome.details()).containsEntry("deadline", "2025-02-27");
+    }
+
+    @Test
+    void theFilingTimesAHeldBookingByTheSameClocks() {
+        AdvancePurchase rule = filing().ticketingDaysAfterReservation(7)
+                .ticketingDaysBeforeDeparture(3)
+                .lateBooking(10, 1)
+                .build();
+        TicketingTerms terms = rule.ticketingTerms();
+        assertThat(terms.holdDays()).contains(7);
+        assertThat(terms.ticketByDaysBefore()).contains(3);
+        assertThat(terms.lateBooking()).contains(new LateBooking(10, 1));
+        TimeLimit late = TimeLimit.limitFor(LocalDate.of(2025, 2, 25), DEPARTURE, terms);
+        assertThat(late.clock()).isSameAs(Clock.LATE_BOOKING);
+        assertThat(late.on()).isEqualTo(LocalDate.of(2025, 2, 26));
+        assertThat(new AdvancePurchase().ticketingTerms()).isEqualTo(TicketingTerms.none());
     }
 }

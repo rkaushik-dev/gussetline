@@ -6,13 +6,15 @@ import static io.github.rkaushikdev.gussetline.rules.Outcome.silent;
 
 import io.github.rkaushikdev.gussetline.Details;
 import io.github.rkaushikdev.gussetline.ValidationError;
+import io.github.rkaushikdev.gussetline.timelimit.TicketingTerms;
+import io.github.rkaushikdev.gussetline.timelimit.TicketingTerms.LateBooking;
+import io.github.rkaushikdev.gussetline.timelimit.TimeLimit;
 import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
+import java.util.Comparator;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.stream.Stream;
 
 /**
  * Category 5, advance reservation and ticketing, as it is filed.
@@ -36,12 +38,14 @@ import java.util.Optional;
  * @param ticketingDaysAfterReservation how long the hold lasts
  * @param ticketingDaysBeforeDeparture the backstop deadline, in days before departure
  * @param bookedOn when the booking was made, when known; otherwise the ticketing date stands in
+ * @param lateBooking the shorter hold a booking made close to departure gets, when filed
  */
 public record AdvancePurchase(
         Optional<Integer> reservationDays,
         Optional<Integer> ticketingDaysAfterReservation,
         Optional<Integer> ticketingDaysBeforeDeparture,
-        Optional<LocalDate> bookedOn)
+        Optional<LocalDate> bookedOn,
+        Optional<LateBooking> lateBooking)
         implements Provision {
 
     /**
@@ -53,6 +57,7 @@ public record AdvancePurchase(
      */
     public AdvancePurchase {
         Objects.requireNonNull(bookedOn, "bookedOn");
+        Objects.requireNonNull(lateBooking, "lateBooking");
         refuseNegative("reservation_days", reservationDays);
         refuseNegative("ticketing_days_after_reservation", ticketingDaysAfterReservation);
         refuseNegative("ticketing_days_before_departure", ticketingDaysBeforeDeparture);
@@ -60,7 +65,7 @@ public record AdvancePurchase(
 
     /** Nothing filed. */
     public AdvancePurchase() {
-        this(Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty());
+        this(Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty());
     }
 
     /** A builder starting from nothing filed. */
@@ -77,7 +82,8 @@ public record AdvancePurchase(
     public boolean isEmpty() {
         return reservationDays.isEmpty()
                 && ticketingDaysAfterReservation.isEmpty()
-                && ticketingDaysBeforeDeparture.isEmpty();
+                && ticketingDaysBeforeDeparture.isEmpty()
+                && lateBooking.isEmpty();
     }
 
     /** The last day the booking may be made, or empty when no reservation period is filed. */
@@ -91,23 +97,38 @@ public record AdvancePurchase(
     }
 
     /**
-     * The earlier of the two deadlines, or empty when neither is filed. The hold period counts only
-     * when the booking date is known.
+     * The earliest of the deadlines, or empty when none is filed. The hold period, and the late
+     * booking hold, count only when the booking date is known, and the late booking hold only when
+     * the booking was made within its window of departure.
      *
-     * <p>Both are computed and then the earlier wins. Returning the first one found would be right
+     * <p>All are computed and then the earliest wins. Returning the first one found would be right
      * about half the time and the half it is wrong about is the late booking, which is the one that
      * matters.
      */
     public Optional<LocalDate> ticketingDeadline(LocalDate departure, Optional<LocalDate> booked) {
-        List<LocalDate> candidates = new ArrayList<>();
-        if (ticketingDaysAfterReservation.isPresent() && booked.isPresent()) {
-            candidates.add(booked.get().plusDays(ticketingDaysAfterReservation.get()));
-        }
-        ticketingDaysBeforeDeparture.ifPresent(days -> candidates.add(departure.minusDays(days)));
-        if (candidates.isEmpty()) {
-            return Optional.empty();
-        }
-        return Optional.of(Collections.min(candidates));
+        Stream<LocalDate> held = booked.stream()
+                .flatMap(day -> Stream.concat(
+                        ticketingDaysAfterReservation.map(day::plusDays).stream(),
+                        lateBooking
+                                .filter(late -> late.applies(ChronoUnit.DAYS.between(day, departure)))
+                                .map(late -> day.plusDays(late.ticketWithinDays()))
+                                .stream()));
+        return Stream.concat(held, ticketingDaysBeforeDeparture.map(departure::minusDays).stream())
+                .min(Comparator.naturalOrder());
+    }
+
+    /**
+     * The filing as the clocks a held booking is timed by ({@link TimeLimit#limitFor(LocalDate,
+     * LocalDate, TicketingTerms)}): the hold, the backstop and the late booking hold, each when filed.
+     */
+    public TicketingTerms ticketingTerms() {
+        TicketingTerms none = TicketingTerms.none();
+        TicketingTerms held = ticketingDaysAfterReservation.map(none::withHold).orElse(none);
+        TicketingTerms backed =
+                ticketingDaysBeforeDeparture.map(held::withBackstop).orElse(held);
+        return lateBooking
+                .map(late -> backed.withLateBooking(late.withinDays(), late.ticketWithinDays()))
+                .orElse(backed);
     }
 
     @Override
@@ -160,6 +181,7 @@ public record AdvancePurchase(
         private Optional<Integer> ticketingDaysAfterReservation = Optional.empty();
         private Optional<Integer> ticketingDaysBeforeDeparture = Optional.empty();
         private Optional<LocalDate> bookedOn = Optional.empty();
+        private Optional<LateBooking> lateBooking = Optional.empty();
 
         private Builder() {}
 
@@ -203,6 +225,17 @@ public record AdvancePurchase(
             return this;
         }
 
+        /** Within {@code withinDays} of departure, ticket within {@code ticketWithinDays} of booking. */
+        public Builder lateBooking(int withinDays, int ticketWithinDays) {
+            return lateBooking(Optional.of(new LateBooking(withinDays, ticketWithinDays)));
+        }
+
+        /** The late booking hold, or that none is filed. */
+        public Builder lateBooking(Optional<LateBooking> value) {
+            lateBooking = value;
+            return this;
+        }
+
         /**
          * The filing.
          *
@@ -210,7 +243,11 @@ public record AdvancePurchase(
          */
         public AdvancePurchase build() {
             return new AdvancePurchase(
-                    reservationDays, ticketingDaysAfterReservation, ticketingDaysBeforeDeparture, bookedOn);
+                    reservationDays,
+                    ticketingDaysAfterReservation,
+                    ticketingDaysBeforeDeparture,
+                    bookedOn,
+                    lateBooking);
         }
     }
 }

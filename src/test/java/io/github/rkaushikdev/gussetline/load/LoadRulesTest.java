@@ -24,6 +24,7 @@ import io.github.rkaushikdev.gussetline.rules.RuleSet;
 import io.github.rkaushikdev.gussetline.rules.RuleStore;
 import io.github.rkaushikdev.gussetline.rules.SalesRestriction;
 import io.github.rkaushikdev.gussetline.rules.VoluntaryChange;
+import io.github.rkaushikdev.gussetline.timelimit.TicketingTerms.LateBooking;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.Arrays;
@@ -160,6 +161,18 @@ class LoadRulesTest {
         assertThat(filed.percent()).contains(new BigDecimal("10.00"));
         assertThat(filed.beforeDeparture()).contains(Money.of("50.00", "EUR"));
         assertThat(load.problems()).isEmpty();
+    }
+
+    @Test
+    void anAdvancePurchaseCanFileALateBookingHold() {
+        RuleLoad load = read(fileOf(head(), advance().with("late_within", 7).with("late_ticket", 1)));
+        AdvancePurchase filed = (AdvancePurchase)
+                load.rules().get(0).forCategory(Category.ADVANCE_RESERVATION).get(0);
+        assertThat(filed.lateBooking()).contains(new LateBooking(7, 1));
+        RuleLoad half = read(fileOf(head(), advance().with("late_within", 7)));
+        AdvancePurchase window = (AdvancePurchase)
+                half.rules().get(0).forCategory(Category.ADVANCE_RESERVATION).get(0);
+        assertThat(window.lateBooking()).isEmpty();
     }
 
     @Test

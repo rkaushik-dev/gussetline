@@ -58,6 +58,11 @@ class PersistenceProvisionsTest {
                     .ticketingDaysBeforeDeparture(21)
                     .build(),
             new AdvancePurchase(),
+            AdvancePurchase.builder()
+                    .ticketingDaysAfterReservation(7)
+                    .ticketingDaysBeforeDeparture(3)
+                    .lateBooking(10, 0)
+                    .build(),
             AdvancePurchase.builder().reservationDays(0).build(),
             new InstantPurchase(24),
             new InstantPurchase(),

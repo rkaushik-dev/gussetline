@@ -17,6 +17,7 @@ import io.github.rkaushikdev.gussetline.rules.RepricingBasis;
 import io.github.rkaushikdev.gussetline.rules.Residual;
 import io.github.rkaushikdev.gussetline.rules.SalesRestriction;
 import io.github.rkaushikdev.gussetline.rules.VoluntaryChange;
+import io.github.rkaushikdev.gussetline.timelimit.TicketingTerms.LateBooking;
 import io.github.rkaushikdev.gussetline.util.Numbers;
 import io.github.rkaushikdev.gussetline.util.Text;
 import java.math.BigDecimal;
@@ -240,18 +241,30 @@ public final class Provisions {
     private static void advanceToRow(AdvancePurchase provision, ProvisionRow row) {
         row.setNumberOne(provision.reservationDays().orElse(null));
         row.setNumberTwo(provision.ticketingDaysAfterReservation().orElse(null));
-        row.setDetail(
-                pack(spill("before", provision.ticketingDaysBeforeDeparture().orElse(null))));
+        Map<String, Object> spilled = new LinkedHashMap<>();
+        spilled.put("before", provision.ticketingDaysBeforeDeparture().orElse(null));
+        provision.lateBooking().ifPresent(late -> {
+            spilled.put("late_within", late.withinDays());
+            spilled.put("late_ticket", late.ticketWithinDays());
+        });
+        row.setDetail(pack(spilled));
     }
 
     private static AdvancePurchase advanceFromRow(ProvisionRow row) {
-        String before = unpack(row.getDetail()).get("before");
+        Map<String, String> spilled = unpack(row.getDetail());
+        Optional<Integer> within = whole(spilled.get("late_within"));
+        Optional<Integer> ticket = whole(spilled.get("late_ticket"));
         return AdvancePurchase.builder()
                 .reservationDays(row.getNumberOne())
                 .ticketingDaysAfterReservation(row.getNumberTwo())
-                .ticketingDaysBeforeDeparture(
-                        before == null || before.isEmpty() ? Optional.empty() : Optional.of(Numbers.parseInt(before)))
+                .ticketingDaysBeforeDeparture(whole(spilled.get("before")))
+                .lateBooking(within.flatMap(days -> ticket.map(hold -> new LateBooking(days, hold))))
                 .build();
+    }
+
+    /** A spilled whole number, or none when it was never written or written empty. */
+    private static Optional<Integer> whole(String spilled) {
+        return spilled == null || spilled.isEmpty() ? Optional.empty() : Optional.of(Numbers.parseInt(spilled));
     }
 
     private static void instantToRow(InstantPurchase provision, ProvisionRow row) {

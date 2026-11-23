@@ -12,6 +12,7 @@ import io.github.rkaushikdev.gussetline.ValidationError;
 import io.github.rkaushikdev.gussetline.components.FareComponent;
 import io.github.rkaushikdev.gussetline.itinerary.Itinerary;
 import io.github.rkaushikdev.gussetline.money.Money;
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
@@ -217,5 +218,71 @@ class RulesPenaltiesTest {
     @Test
     void noFeeAtAllLeavesNothingBecauseNothingMayBeRefunded() {
         assertThat(residualValue(Money.of("500.00", "EUR"), Optional.empty())).isEqualTo(Money.zero("EUR"));
+    }
+
+    private static final Optional<Money> PAID = Optional.of(Money.of("840.00", "EUR"));
+    private static final Optional<LocalDate> BEFORE = Optional.of(LocalDate.of(2025, 3, 1));
+
+    private static Penalty.Builder percentOnly(String rate) {
+        return Penalty.builder().action(Action.CHANGE).percent(new BigDecimal(rate));
+    }
+
+    @Test
+    void aPercentageIsReadOffTheFarePaid() {
+        Penalty tenth = percentOnly("10").build();
+        assertThat(tenth.amountOn(context(), BEFORE, PAID)).contains(Money.of("84.00", "EUR"));
+        // 7.5 percent of 333.33 is 24.99975, to the cent with halves away from zero.
+        assertThat(percentOnly("7.5").build().amountOn(context(), BEFORE, Optional.of(Money.of("333.33", "EUR"))))
+                .contains(Money.of("25.00", "EUR"));
+    }
+
+    @Test
+    void aPercentageWithAnAmountChargesTheHigherOfTheTwo() {
+        Penalty withMinimum = change().percent(new BigDecimal("10")).build();
+        assertThat(withMinimum.amountOn(context(), BEFORE, PAID)).contains(Money.of("84.00", "EUR"));
+        Penalty five = change().percent(new BigDecimal("5")).build();
+        assertThat(five.amountOn(context(), BEFORE, PAID)).contains(Money.of("50.00", "EUR"));
+        // Once travel has started the after departure amount is the floor.
+        assertThat(withMinimum.amountOn(context(), Optional.of(LocalDate.of(2025, 3, 10)), PAID))
+                .contains(Money.of("200.00", "EUR"));
+    }
+
+    @Test
+    void aPercentageWithNoFareGivenChargesOnlyWhatIsFiledInMoney() {
+        assertThat(percentOnly("10").build().amountOn(context(), BEFORE)).isEmpty();
+        assertThat(change().percent(new BigDecimal("10")).build().amountOn(context(), BEFORE))
+                .contains(Money.of("50.00", "EUR"));
+    }
+
+    @Test
+    void aPercentageIsMultipliedPerComponentLikeAnyFee() {
+        Penalty perComponent = percentOnly("10").applies(Applies.PER_COMPONENT).build();
+        assertThat(perComponent.charge(context(), 2, BEFORE, PAID)).contains(Money.of("168.00", "EUR"));
+        assertThat(totalPenalty(List.of(perComponent), context(), 2, BEFORE, PAID))
+                .contains(Money.of("168.00", "EUR"));
+        Penalty highest = percentOnly("10").applies(Applies.HIGHEST_OF).build();
+        assertThat(totalPenalty(List.of(highest), context(), 2, BEFORE, PAID)).contains(Money.of("168.00", "EUR"));
+    }
+
+    @Test
+    void aPercentageOnAnActionNotPermittedChargesNothing() {
+        Penalty refused = percentOnly("10").permitted(false).build();
+        assertThat(refused.charge(context(), 1, BEFORE, PAID)).isEmpty();
+    }
+
+    @Test
+    void aPercentageOutsideNoughtToAHundredIsRefused() {
+        assertThatThrownBy(() -> percentOnly("-1").build())
+                .isInstanceOf(ValidationError.class)
+                .hasMessageContaining("between nought and a hundred");
+        assertThatThrownBy(() -> percentOnly("100.5").build()).isInstanceOf(ValidationError.class);
+    }
+
+    @Test
+    void aFilingWithOnlyAPercentageIsNotEmptyAndSaysSo() {
+        Penalty tenth = percentOnly("10").build();
+        assertThat(tenth.isEmpty()).isFalse();
+        assertThat(tenth).hasToString("change None before, None after, per_ticket, 10 percent");
+        assertThat(tenth.evaluate(context()).applied()).isTrue();
     }
 }

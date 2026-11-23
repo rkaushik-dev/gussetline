@@ -153,6 +153,16 @@ class LoadRulesTest {
     }
 
     @Test
+    void aPenaltyCanBeFiledAsAPercentageOfTheFare() {
+        RuleLoad load = read(fileOf(head(), penalty().with("percent", new BigDecimal("10.00"))));
+        Penalty filed =
+                (Penalty) load.rules().get(0).forCategory(Category.PENALTIES).get(0);
+        assertThat(filed.percent()).contains(new BigDecimal("10.00"));
+        assertThat(filed.beforeDeparture()).contains(Money.of("50.00", "EUR"));
+        assertThat(load.problems()).isEmpty();
+    }
+
+    @Test
     void aSecondHeaderClosesTheFirstRule() {
         RuleLoad load = read(fileOf(
                 head().with("number", "0100"),

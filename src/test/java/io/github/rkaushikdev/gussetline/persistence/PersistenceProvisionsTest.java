@@ -28,6 +28,7 @@ import io.github.rkaushikdev.gussetline.rules.RepricingBasis;
 import io.github.rkaushikdev.gussetline.rules.Residual;
 import io.github.rkaushikdev.gussetline.rules.SalesRestriction;
 import io.github.rkaushikdev.gussetline.rules.VoluntaryChange;
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -90,6 +91,15 @@ class PersistenceProvisionsTest {
                     .noShowForfeits(true)
                     .build(),
             Penalty.builder().action(Action.NO_SHOW).permitted(false).build(),
+            Penalty.builder()
+                    .action(Action.CHANGE)
+                    .beforeDeparture(Money.of("50.00", "EUR"))
+                    .percent(new BigDecimal("12.5"))
+                    .build(),
+            Penalty.builder()
+                    .action(Action.CANCEL)
+                    .percent(new BigDecimal("25"))
+                    .build(),
             new Penalty(),
             new VoluntaryChange(),
             VoluntaryChange.builder()

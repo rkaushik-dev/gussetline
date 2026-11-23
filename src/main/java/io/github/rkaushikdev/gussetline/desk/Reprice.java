@@ -76,8 +76,8 @@ public final class Reprice {
      *       Verdict#NOT_WORTH_IT}; anything else is a {@link Verdict#REISSUE}.
      * </ol>
      *
-     * <p>The fee is every change filing added up across the ticket's coupons on {@code today}, nothing
-     * when none is chargeable. The benefit is the drop less the fee; a retained residual comes back as a
+     * <p>The fee is every change filing added up across the ticket's coupons on {@code today}, a fee
+     * filed as a percentage read off what the watch paid, nothing when none is chargeable. The benefit is the drop less the fee; a retained residual comes back as a
      * credit and counts at {@code creditDiscount} of that, to the cent, half to even.
      *
      * <p>Then the hold. When the terms record what the ticket held carries, the fare offered is
@@ -126,7 +126,11 @@ public final class Reprice {
                 .filter(penalty -> penalty.action() == Action.CHANGE)
                 .toList();
         Money fee = Penalties.totalPenalty(
-                        changes, terms.context(), watch.ticket().coupons().size(), today)
+                        changes,
+                        terms.context(),
+                        watch.ticket().coupons().size(),
+                        Optional.of(today),
+                        Optional.of(watch.paid()))
                 .orElseGet(() -> Money.zero(currency));
         if (!fee.currency().equals(currency)) {
             throw new ValidationError(

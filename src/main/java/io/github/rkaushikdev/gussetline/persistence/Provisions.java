@@ -19,6 +19,7 @@ import io.github.rkaushikdev.gussetline.rules.SalesRestriction;
 import io.github.rkaushikdev.gussetline.rules.VoluntaryChange;
 import io.github.rkaushikdev.gussetline.util.Numbers;
 import io.github.rkaushikdev.gussetline.util.Text;
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -314,20 +315,27 @@ public final class Provisions {
         row.setCurrency(before.or(() -> after).map(Money::currency).orElse(""));
         row.setFlagOne(provision.permitted());
         row.setFlagTwo(provision.noShowForfeits());
-        row.setDetail(pack(spill("after", after.map(Money::amount).orElse(null))));
+        Map<String, Object> spilled = new LinkedHashMap<>();
+        spilled.put("after", after.map(Money::amount).orElse(null));
+        spilled.put("percent", provision.percent().orElse(null));
+        row.setDetail(pack(spilled));
     }
 
     private static Penalty penaltyFromRow(ProvisionRow row) {
-        String after = unpack(row.getDetail()).get("after");
+        Map<String, String> spilled = unpack(row.getDetail());
         return new Penalty(
                 Action.of(row.getTextOne()),
                 row.getAmount().map(amount -> new Money(amount, row.getCurrency())),
-                after == null || after.isEmpty()
-                        ? Optional.empty()
-                        : Optional.of(new Money(Numbers.parseDecimal(after), row.getCurrency())),
+                decimal(spilled.get("after")).map(amount -> new Money(amount, row.getCurrency())),
                 Applies.of(row.getTextTwo()),
                 row.isFlagOne(),
-                row.isFlagTwo());
+                row.isFlagTwo(),
+                decimal(spilled.get("percent")));
+    }
+
+    /** A spilled decimal, or none when it was never written or written empty. */
+    private static Optional<BigDecimal> decimal(String spilled) {
+        return spilled == null || spilled.isEmpty() ? Optional.empty() : Optional.of(Numbers.parseDecimal(spilled));
     }
 
     private static void changesToRow(VoluntaryChange provision, ProvisionRow row) {

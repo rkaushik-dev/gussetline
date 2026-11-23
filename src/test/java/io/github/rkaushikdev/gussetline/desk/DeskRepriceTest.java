@@ -21,6 +21,7 @@ import io.github.rkaushikdev.gussetline.rules.Penalty;
 import io.github.rkaushikdev.gussetline.rules.RepricingBasis;
 import io.github.rkaushikdev.gussetline.rules.Residual;
 import io.github.rkaushikdev.gussetline.rules.VoluntaryChange;
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -387,5 +388,17 @@ class DeskRepriceTest {
         assertThatThrownBy(() -> decide(seeing(Baggage.ofPieces(1), "50.00"), dollars, TODAY))
                 .isInstanceOf(ValidationError.class)
                 .hasMessageContaining("one currency");
+    }
+
+    @Test
+    void aFeeFiledAsAPercentageIsReadOffWhatTheWatchPaid() {
+        Penalty tenth = Penalty.builder()
+                .action(Action.CHANGE)
+                .percent(new BigDecimal("10"))
+                .build();
+        Decision made = decide(watch(), refundable(), List.of(tenth), context(), TODAY);
+        assertThat(made.penalty()).contains(eur("84.00"));
+        assertThat(made.benefit()).contains(eur("56.00"));
+        assertThat(made.verdict()).isSameAs(Verdict.REISSUE);
     }
 }

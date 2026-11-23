@@ -71,25 +71,30 @@ public final class Penalties {
      */
     public static Optional<Money> totalPenalty(
             List<Penalty> penalties, Context context, int components, Optional<LocalDate> on) {
+        return totalPenalty(penalties, context, components, on, Optional.empty());
+    }
+
+    /**
+     * {@link #totalPenalty(List, Context, int, Optional)} with the fare paid, which a fee filed as a
+     * percentage is worked out on ({@link Penalty#amountOn(Context, Optional, Optional)}).
+     *
+     * @throws ValidationError when the charges are in more than one currency, naming the {@code
+     *     currencies}, sorted
+     */
+    public static Optional<Money> totalPenalty(
+            List<Penalty> penalties, Context context, int components, Optional<LocalDate> on, Optional<Money> fare) {
         List<Money> charges = new ArrayList<>();
         for (Penalty penalty : penalties) {
-            if (penalty.applies() == Applies.HIGHEST_OF) {
-                penalty.amountOn(context, on)
-                        .flatMap(base -> highestOf(multiples(base, components)))
-                        .ifPresent(charges::add);
-                continue;
-            }
-            penalty.charge(context, components, on).ifPresent(charges::add);
+            Optional<Money> charged = penalty.applies() == Applies.HIGHEST_OF
+                    ? penalty.amountOn(context, on, fare).flatMap(base -> highestOf(multiples(base, components)))
+                    : penalty.charge(context, components, on, fare);
+            charged.ifPresent(charges::add);
         }
         if (charges.isEmpty()) {
             return Optional.empty();
         }
         refuseMixedCurrencies(charges);
-        Money running = Money.zero(charges.get(0).currency());
-        for (Money charge : charges) {
-            running = running.plus(charge);
-        }
-        return Optional.of(running);
+        return Optional.of(Money.total(charges));
     }
 
     /** Whether any filing permits a cancellation at all. A fare with no cancel filing is refundable. */

@@ -121,8 +121,8 @@ public final class RuleFeed {
 
     /**
      * Category 16: the action code, {@code N} when the action is not permitted, the currency, the
-     * amounts before and after departure, the scope code, and a {@code Y} when a no show forfeits the
-     * ticket.
+     * amounts before and after departure, the scope code, a {@code Y} when a no show forfeits the
+     * ticket, and the fee as a percentage of the fare.
      */
     public static final RecordSpec PENALTY = new RecordSpec(
             "R16",
@@ -132,7 +132,8 @@ public final class RuleFeed {
             optional("before", 8, 9, Kind.AMOUNT),
             optional("after", 17, 9, Kind.AMOUNT),
             optional("applies", 26, 1, Kind.TEXT),
-            optional("no_show_forfeits", 27, 1, Kind.TEXT));
+            optional("no_show_forfeits", 27, 1, Kind.TEXT),
+            optional("percent", 28, 6, Kind.AMOUNT));
 
     /**
      * Category 31: {@code N} when changes are not permitted, the basis and residual codes, and a
@@ -339,6 +340,7 @@ public final class RuleFeed {
                 .afterDeparture(money(record, "after", currency))
                 .applies(lookedUp(APPLIES, record, "applies", Applies.PER_TICKET, "penalty scope"))
                 .noShowForfeits(flag(record, "no_show_forfeits"))
+                .percent(record.find("percent", BigDecimal.class))
                 .build();
     }
 

@@ -7,7 +7,9 @@ import static io.github.rkaushikdev.gussetline.rules.Outcome.silent;
 import io.github.rkaushikdev.gussetline.Details;
 import io.github.rkaushikdev.gussetline.ValidationError;
 import io.github.rkaushikdev.gussetline.money.Money;
+import io.github.rkaushikdev.gussetline.util.Numbers;
 import io.github.rkaushikdev.gussetline.util.Text;
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.Objects;
 import java.util.Optional;
@@ -31,6 +33,8 @@ import java.util.Optional;
  * @param applies how many times the fee is charged
  * @param permitted whether the action is allowed at all
  * @param noShowForfeits whether a no show forfeits the ticket
+ * @param percent the fee as a percentage of the fare paid, when filed that way; with an amount filed
+ *     too, the higher of the two is charged
  */
 public record Penalty(
         Action action,
@@ -38,21 +42,42 @@ public record Penalty(
         Optional<Money> afterDeparture,
         Applies applies,
         boolean permitted,
-        boolean noShowForfeits)
+        boolean noShowForfeits,
+        Optional<BigDecimal> percent)
         implements Provision {
+
+    private static final BigDecimal HUNDRED = BigDecimal.valueOf(100);
 
     /**
      * Checks the amounts.
      *
-     * @throws ValidationError when an amount is negative, naming the {@code amount}
+     * @throws ValidationError when an amount is negative, naming the {@code amount}, or the percentage
+     *     is outside nought to a hundred, naming the {@code percent}
      */
     public Penalty {
         Objects.requireNonNull(action, "action");
         Objects.requireNonNull(beforeDeparture, "beforeDeparture");
         Objects.requireNonNull(afterDeparture, "afterDeparture");
         Objects.requireNonNull(applies, "applies");
+        Objects.requireNonNull(percent, "percent");
         refuseNegative(beforeDeparture);
         refuseNegative(afterDeparture);
+        if (percent.isPresent() && (percent.get().signum() < 0 || percent.get().compareTo(HUNDRED) > 0)) {
+            throw new ValidationError(
+                    "a penalty percentage is between nought and a hundred",
+                    Details.of("percent", percent.get().toString()));
+        }
+    }
+
+    /** A filing with no percentage. */
+    public Penalty(
+            Action action,
+            Optional<Money> beforeDeparture,
+            Optional<Money> afterDeparture,
+            Applies applies,
+            boolean permitted,
+            boolean noShowForfeits) {
+        this(action, beforeDeparture, afterDeparture, applies, permitted, noShowForfeits, Optional.empty());
     }
 
     /** Nothing filed: a change, permitted, with no amount. */
@@ -87,7 +112,7 @@ public record Penalty(
 
     /** Whether nothing is filed: the action is permitted and no amount is given. */
     public boolean isEmpty() {
-        return permitted && beforeDeparture.isEmpty() && afterDeparture.isEmpty();
+        return permitted && beforeDeparture.isEmpty() && afterDeparture.isEmpty() && percent.isEmpty();
     }
 
     /** {@link #travelStarted(Context, Optional)} on the context's own day. */
@@ -119,16 +144,29 @@ public record Penalty(
         return amountOn(context, Optional.of(on));
     }
 
-    /**
-     * The filed amount that applies on a day, before multiplying: the after departure amount once
-     * travel has started, when one is filed, and the before departure amount otherwise. Empty when
-     * neither applies.
-     */
+    /** {@link #amountOn(Context, Optional, Optional)} with no fare to read a percentage off. */
     public Optional<Money> amountOn(Context context, Optional<LocalDate> on) {
-        if (travelStarted(context, on)) {
-            return afterDeparture.or(() -> beforeDeparture);
+        return amountOn(context, on, Optional.empty());
+    }
+
+    /**
+     * The fee that applies on a day, before multiplying: the after departure amount once travel has
+     * started, when one is filed, and the before departure amount otherwise. A filed percentage of
+     * the fare is worked out on the fare given, to the minor unit with halves away from zero, and
+     * when an amount applies as well the higher of the two stands, which is how a carrier writes
+     * {@code 10 percent, minimum 50 EUR}. Empty when nothing applies, or when only a percentage is
+     * filed and no fare was given.
+     *
+     * @throws ValidationError when the fare and the filed amount are in different currencies
+     */
+    public Optional<Money> amountOn(Context context, Optional<LocalDate> on, Optional<Money> fare) {
+        Optional<Money> filed = travelStarted(context, on) ? afterDeparture.or(() -> beforeDeparture) : beforeDeparture;
+        Optional<Money> share = percent.flatMap(rate -> fare.map(paid -> Money.roundTax(
+                new Money(Numbers.divide(paid.amount().multiply(rate, Numbers.CONTEXT), HUNDRED), paid.currency()))));
+        if (filed.isPresent() && share.isPresent()) {
+            return Optional.of(share.get().isGreaterThan(filed.get()) ? share.get() : filed.get());
         }
-        return beforeDeparture;
+        return filed.or(() -> share);
     }
 
     /** {@link #charge(Context, int, Optional)} for one component on the context's own day. */
@@ -155,10 +193,16 @@ public record Penalty(
      * the most valuable thing on the desk and a fare that cannot be changed is the least.
      */
     public Optional<Money> charge(Context context, int components, Optional<LocalDate> on) {
+        return charge(context, components, on, Optional.empty());
+    }
+
+    /** {@link #charge(Context, int, Optional)} with a fare to read a filed percentage off. */
+    public Optional<Money> charge(Context context, int components, Optional<LocalDate> on, Optional<Money> fare) {
         if (!permitted) {
             return Optional.empty();
         }
-        return amountOn(context, on).map(base -> applies == Applies.PER_COMPONENT ? base.times(components) : base);
+        return amountOn(context, on, fare)
+                .map(base -> applies == Applies.PER_COMPONENT ? base.times(components) : base);
     }
 
     /**
@@ -188,7 +232,8 @@ public record Penalty(
 
     /**
      * The filing in one line: {@code change 50.00 EUR before, 200.00 EUR after, per_ticket}, an
-     * amount not filed reading {@code None}; or {@code change not permitted}.
+     * amount not filed reading {@code None} and a percentage added at the end; or {@code change not
+     * permitted}.
      */
     @Override
     public String toString() {
@@ -196,7 +241,8 @@ public record Penalty(
             return action.value() + " not permitted";
         }
         return action.value() + " " + Text.plain(beforeDeparture.orElse(null)) + " before, "
-                + Text.plain(afterDeparture.orElse(null)) + " after, " + applies.value();
+                + Text.plain(afterDeparture.orElse(null)) + " after, " + applies.value()
+                + percent.map(rate -> ", " + rate.toPlainString() + " percent").orElse("");
     }
 
     private static void refuseNegative(Optional<Money> amount) {
@@ -216,6 +262,7 @@ public record Penalty(
         private Applies applies = Applies.PER_TICKET;
         private boolean permitted = true;
         private boolean noShowForfeits;
+        private Optional<BigDecimal> percent = Optional.empty();
 
         private Builder() {}
 
@@ -259,13 +306,23 @@ public record Penalty(
             return this;
         }
 
+        public Builder percent(BigDecimal value) {
+            return percent(Optional.of(value));
+        }
+
+        /** The fee as a percentage of the fare, or that none is filed. */
+        public Builder percent(Optional<BigDecimal> value) {
+            percent = value;
+            return this;
+        }
+
         /**
          * The filing.
          *
          * @throws ValidationError when an amount is negative
          */
         public Penalty build() {
-            return new Penalty(action, beforeDeparture, afterDeparture, applies, permitted, noShowForfeits);
+            return new Penalty(action, beforeDeparture, afterDeparture, applies, permitted, noShowForfeits, percent);
         }
     }
 }

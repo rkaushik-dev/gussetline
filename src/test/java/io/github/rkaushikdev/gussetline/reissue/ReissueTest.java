@@ -159,6 +159,64 @@ class ReissueTest {
     }
 
     @Test
+    void twoChargesAtOnePointAreAddedTogether() {
+        // A round trip through Denver pays the facility charge there twice. The new ticket only
+        // passes once, so one of the two comes back.
+        TaxReissue report =
+                assess(List.of(tax("XF", "DEN", "4.50"), tax("XF", "DEN", "4.50")), List.of(tax("XF", "DEN", "4.50")));
+        assertThat(report.lines()).hasSize(1);
+        assertThat(report.lines().get(0).was()).isEqualTo(eur("9.00"));
+        assertThat(report.lines().get(0).treatment()).isEqualTo(Treatment.REFUNDED);
+        assertThat(report.refund()).isEqualTo(eur("4.50"));
+    }
+
+    @Test
+    void aTaxEarnedOnIssueStaysWithTheGovernment() {
+        TaxReissue report =
+                assess(List.of(tax("AT", "VIE", "32.50")), List.of(), Set.of(), Residual.REFUNDABLE, Set.of("at"));
+        assertThat(report.lines().get(0).treatment()).isEqualTo(Treatment.NOT_REFUNDABLE);
+        assertThat(report.refund()).isEqualTo(Money.zero("EUR"));
+        assertThat(report.retained()).isEqualTo(eur("32.50"));
+        TaxReissue refundable = assess(List.of(tax("AT", "VIE", "32.50")), List.of());
+        assertThat(refundable.retained()).isEqualTo(Money.zero("EUR"));
+        assertThat(refundable.refund()).isEqualTo(eur("32.50"));
+    }
+
+    @Test
+    void aTaxEarnedOnIssueThatWentUpIsStillCollected() {
+        TaxReissue report = assess(
+                List.of(tax("AT", "VIE", "32.50")),
+                List.of(tax("AT", "VIE", "40.00")),
+                Set.of(),
+                Residual.REFUNDABLE,
+                Set.of("AT"));
+        assertThat(report.lines().get(0).treatment()).isEqualTo(Treatment.COLLECTED);
+        assertThat(report.collect()).isEqualTo(eur("7.50"));
+    }
+
+    @Test
+    void aFlownTaxIsFlownBeforeItIsRetained() {
+        TaxReissue report =
+                assess(List.of(tax("AT", "VIE", "32.50")), List.of(), Set.of("VIE"), Residual.REFUNDABLE, Set.of("AT"));
+        assertThat(report.lines().get(0).treatment()).isEqualTo(Treatment.FLOWN);
+        assertThat(report.retained()).isEqualTo(Money.zero("EUR"));
+    }
+
+    @Test
+    void aCarrierSurchargeIsNeverRetainedAsATax() {
+        TaxReissue report =
+                assess(List.of(imposed("YQ", "FRA", "180.00")), List.of(), Set.of(), Residual.REFUNDABLE, Set.of("YQ"));
+        assertThat(report.lines().get(0).treatment()).isEqualTo(Treatment.REFUNDED);
+        assertThat(report.refund()).isEqualTo(eur("180.00"));
+    }
+
+    @Test
+    void aRetainedLineMovesNoMoneyAndReadsBackByName() {
+        assertThat(Treatment.NOT_REFUNDABLE.movesMoney()).isFalse();
+        assertThat(Treatment.of("not_refundable")).isEqualTo(Treatment.NOT_REFUNDABLE);
+    }
+
+    @Test
     void theLinesComeBackInASettledOrder() {
         TaxReissue report = assess(List.of(tax("XT", "VIE", "32.50"), tax("DE", "FRA", "32.50")), List.of());
         assertThat(report.lines()).extracting(Line::code).containsExactly("DE", "XT");

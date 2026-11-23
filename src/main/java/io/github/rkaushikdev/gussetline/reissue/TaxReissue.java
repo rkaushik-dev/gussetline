@@ -21,6 +21,10 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.function.Function;
+import java.util.function.Predicate;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
  * What a reissue does to the taxes, which is where the money actually goes: every tax line on the
@@ -74,42 +78,29 @@ public record TaxReissue(String currency, List<Line> lines) {
 
     /** What the passenger pays in tax: the sum of every collected line. */
     public Money collect() {
-        Money total = Money.zero(currency);
-        for (Line line : lines) {
-            total = total.plus(line.collected());
-        }
-        return total;
+        return total(line -> true, Line::collected);
     }
 
     /** What comes back in tax: the sum of every refunded line. */
     public Money refund() {
-        Money total = Money.zero(currency);
-        for (Line line : lines) {
-            total = total.plus(line.refunded());
-        }
-        return total;
+        return total(line -> true, Line::refunded);
     }
 
     /** What the carrier keeps, which is a residual and not a refund. */
     public Money kept() {
-        Money total = Money.zero(currency);
-        for (Line line : lines) {
-            if (line.treatment() == Treatment.KEPT) {
-                total = total.plus(line.was().minus(line.now()));
-            }
-        }
-        return total;
+        return total(
+                line -> line.treatment() == Treatment.KEPT, line -> line.was().minus(line.now()));
     }
 
     /** What is gone because the taxable event already happened. */
     public Money flown() {
-        Money total = Money.zero(currency);
-        for (Line line : lines) {
-            if (line.treatment() == Treatment.FLOWN) {
-                total = total.plus(line.was());
-            }
-        }
-        return total;
+        return total(line -> line.treatment() == Treatment.FLOWN, Line::was);
+    }
+
+    /** What went down and stays with the government, because the tax is not refunded once issued. */
+    public Money retained() {
+        return total(line -> line.treatment() == Treatment.NOT_REFUNDABLE, line -> line.was()
+                .minus(line.now()));
     }
 
     /** The lines given one treatment, in order. */
@@ -126,6 +117,10 @@ public record TaxReissue(String currency, List<Line> lines) {
     @Override
     public String toString() {
         return "collect " + collect() + ", refund " + refund() + ", " + lines.size() + " lines";
+    }
+
+    private Money total(Predicate<Line> which, Function<Line, Money> part) {
+        return lines.stream().filter(which).map(part).reduce(Money.zero(currency), Money::plus);
     }
 
     /** {@link #assess(List, List, Set, Residual)} with nothing flown and a refundable residual. */
@@ -145,8 +140,8 @@ public record TaxReissue(String currency, List<Line> lines) {
 
     /**
      * Work out every tax line, per code and per point, comparing the taxes the old ticket carried with
-     * the ones the new ticket carries. Codes and points are compared ignoring case; of two taxes on one
-     * ticket at the same code and point, the later one stands.
+     * the ones the new ticket carries. Codes and points are compared ignoring case; two taxes on one
+     * ticket at the same code and point are added together.
      *
      * <p>Each line is decided in the order the rules stack. A line that went up is collected. A line
      * that did not move is unchanged. A government tax that went down at a point already departed is
@@ -162,13 +157,30 @@ public record TaxReissue(String currency, List<Line> lines) {
      */
     public static TaxReissue assess(
             List<AppliedTax> was, List<AppliedTax> now, Set<String> flownPoints, Residual residual) {
+        return assess(was, now, flownPoints, residual, Set.of());
+    }
+
+    /**
+     * {@link #assess(List, List, Set, Residual)} with some codes that never come back.
+     *
+     * <p>Some countries file a tax as earned the moment the ticket is issued, flown or not: a
+     * government tax under one of these codes that went down stays with the government ({@link
+     * Treatment#NOT_REFUNDABLE}) rather than being refunded. A carrier surcharge is never one of
+     * them, because it follows the residual and not a government's filing.
+     *
+     * @param nonRefundable the codes whose country does not refund them, in any case
+     */
+    public static TaxReissue assess(
+            List<AppliedTax> was,
+            List<AppliedTax> now,
+            Set<String> flownPoints,
+            Residual residual,
+            Set<String> nonRefundable) {
+        Set<String> retainedCodes = upper(nonRefundable);
         String currency = currencyOf(was, now);
         Map<Key, AppliedTax> before = byKey(was);
         Map<Key, AppliedTax> after = byKey(now);
-        Set<String> gone = new LinkedHashSet<>();
-        for (String point : flownPoints) {
-            gone.add(point.toUpperCase(Locale.ROOT));
-        }
+        Set<String> gone = upper(flownPoints);
 
         TreeSet<Key> keys = new TreeSet<>(SETTLED);
         keys.addAll(before.keySet());
@@ -181,7 +193,8 @@ public record TaxReissue(String currency, List<Line> lines) {
                     Optional.ofNullable(after.get(key)),
                     currency,
                     gone,
-                    residual));
+                    residual,
+                    retainedCodes));
         }
         return new TaxReissue(currency, lines);
     }
@@ -244,7 +257,8 @@ public record TaxReissue(String currency, List<Line> lines) {
             Optional<AppliedTax> fresh,
             String currency,
             Set<String> flown,
-            Residual residual) {
+            Residual residual,
+            Set<String> retainedCodes) {
         boolean imposed = old.or(() -> fresh).map(AppliedTax::carrierImposed).orElse(false);
         Money was = old.map(AppliedTax::amount).orElse(Money.zero(currency));
         Money became = fresh.map(AppliedTax::amount).orElse(Money.zero(currency));
@@ -266,26 +280,36 @@ public record TaxReissue(String currency, List<Line> lines) {
             // than the rules a government writes.
             return new Line(key.code(), key.point(), was, became, Treatment.KEPT, imposed);
         }
+        if (!imposed && retainedCodes.contains(key.code())) {
+            return new Line(key.code(), key.point(), was, became, Treatment.NOT_REFUNDABLE, imposed);
+        }
         return new Line(key.code(), key.point(), was, became, Treatment.REFUNDED, imposed);
     }
 
-    /** The taxes by code and point, the later of two at one key standing. */
+    /**
+     * The taxes by code and point, two charges at one key added together. A round trip that passes
+     * a point twice is charged there twice, and keeping only one of them refunds or collects half of
+     * what moved.
+     */
     private static Map<Key, AppliedTax> byKey(List<AppliedTax> taxes) {
         Map<Key, AppliedTax> found = new LinkedHashMap<>();
         for (AppliedTax tax : taxes) {
-            found.put(new Key(tax.code().toUpperCase(Locale.ROOT), tax.point().toUpperCase(Locale.ROOT)), tax);
+            found.merge(
+                    new Key(tax.code().toUpperCase(Locale.ROOT), tax.point().toUpperCase(Locale.ROOT)),
+                    tax,
+                    (first, second) -> first.withAmount(first.amount().plus(second.amount())));
         }
         return found;
     }
 
+    private static Set<String> upper(Collection<String> codes) {
+        return codes.stream().map(code -> code.toUpperCase(Locale.ROOT)).collect(Collectors.toUnmodifiableSet());
+    }
+
     private static String currencyOf(List<AppliedTax> was, List<AppliedTax> now) {
-        TreeSet<String> found = new TreeSet<>();
-        for (AppliedTax tax : was) {
-            found.add(tax.amount().currency());
-        }
-        for (AppliedTax tax : now) {
-            found.add(tax.amount().currency());
-        }
+        TreeSet<String> found = Stream.concat(was.stream(), now.stream())
+                .map(tax -> tax.amount().currency())
+                .collect(Collectors.toCollection(TreeSet::new));
         if (found.isEmpty()) {
             throw new ValidationError("a reissue needs a tax to compare");
         }

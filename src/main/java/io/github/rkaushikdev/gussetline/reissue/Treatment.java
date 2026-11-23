@@ -5,13 +5,16 @@ package io.github.rkaushikdev.gussetline.reissue;
  *
  * <p>Collected and refunded move money between the passenger and the carrier. Kept is a carrier
  * surcharge that followed a residual the carrier keeps. Flown is a tax whose taxable event already
- * happened. Unchanged is a line that did not move.
+ * happened. Not refundable is a tax its country keeps once the ticket is issued. Unchanged is a line
+ * that did not move.
  */
 public enum Treatment {
     COLLECTED("collected"),
     REFUNDED("refunded"),
     KEPT("kept"),
     FLOWN("flown"),
+    /** A government tax that went down and stays with the government, because it is earned on issue. */
+    NOT_REFUNDABLE("not_refundable"),
     UNCHANGED("unchanged");
 
     private final String value;

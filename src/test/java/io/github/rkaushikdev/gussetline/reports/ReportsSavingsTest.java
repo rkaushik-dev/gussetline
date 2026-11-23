@@ -252,4 +252,60 @@ class ReportsSavingsTest {
         assertThat(out).contains("by agent");
         assertThat(out).contains("anna");
     }
+
+    /** A taken recommendation on another series, raised in June. */
+    private static Recommendation onSeries(String seriesKey, String benefit) {
+        Recommendation row = new Recommendation(
+                "220-1234567891",
+                seriesKey,
+                JUNE,
+                eur("840.00"),
+                eur("700.00"),
+                eur("50.00"),
+                eur(benefit),
+                Residual.REFUNDABLE);
+        row.take(JUNE, "anna");
+        return row;
+    }
+
+    @Test
+    void theRecommendationsAreGroupedByTheMarketWatched() {
+        Savings report = build(
+                List.of(
+                        made("90.00", State.TAKEN),
+                        onSeries("MUC-LON-2025-09-01-C", "120.00"),
+                        onSeries("FRA-NYC-2025-08-11-Y", "30.00")),
+                "EUR");
+        assertThat(labels(report.byMarket())).containsExactly("FRA-NYC", "MUC-LON");
+        assertThat(report.byMarket().get(0).raised()).isEqualTo(2);
+        assertThat(report.byMarket().get(0).realised()).isEqualTo(eur("120.00"));
+        assertThat(report.byMarket().get(1).realised()).isEqualTo(eur("120.00"));
+    }
+
+    @Test
+    void anOpenOrSupersededRecommendationStillCountsForItsMarket() {
+        Savings report = build(List.of(made(State.OPEN), made(State.SUPERSEDED)), "EUR");
+        assertThat(labels(report.byMarket())).containsExactly("FRA-NYC");
+        assertThat(report.byMarket().get(0).stillOpen()).isEqualTo(1);
+        assertThat(report.byMarket().get(0).superseded()).isEqualTo(1);
+        assertThat(report.byAgent()).isEmpty();
+    }
+
+    @Test
+    void theWindowLeavesOutAMarketWithNothingRaisedInIt() {
+        Savings report = build(
+                List.of(made("90.00", JUNE, State.OPEN, "anna"), made("90.00", JULY, State.OPEN, "anna")),
+                "EUR",
+                Optional.of(JULY),
+                Optional.of(JULY));
+        assertThat(report.overall().raised()).isEqualTo(1);
+        assertThat(labels(report.byMarket())).containsExactly("FRA-NYC");
+        assertThat(labels(report.byMonth())).containsExactly("2025-07");
+    }
+
+    @Test
+    void theRenderedReportShowsTheMarketsWhenThereAreSome() {
+        assertThat(render(build(List.of(made(State.TAKEN, "anna")), "EUR"))).contains("by market");
+        assertThat(render(build(List.of(), "EUR"))).doesNotContain("by market");
+    }
 }

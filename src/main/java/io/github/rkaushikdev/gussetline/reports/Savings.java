@@ -4,6 +4,7 @@ import io.github.rkaushikdev.gussetline.desk.Recommendation;
 import io.github.rkaushikdev.gussetline.desk.State;
 import io.github.rkaushikdev.gussetline.money.Money;
 import io.github.rkaushikdev.gussetline.reports.Layout.Figure;
+import io.github.rkaushikdev.gussetline.series.Series;
 import io.github.rkaushikdev.gussetline.util.Numbers;
 import io.github.rkaushikdev.gussetline.util.Text;
 import java.math.BigDecimal;
@@ -16,6 +17,8 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.function.Function;
+import java.util.stream.StreamSupport;
 
 /**
  * The savings report, which is the one the desk is measured on.
@@ -45,8 +48,9 @@ import java.util.Optional;
  * @param overall every recommendation in the window
  * @param byMonth one line per month raised, in month order
  * @param byAgent one line per person who settled something, in name order
+ * @param byMarket one line per city pair watched, in name order
  */
-public record Savings(String currency, Line overall, List<Line> byMonth, List<Line> byAgent) {
+public record Savings(String currency, Line overall, List<Line> byMonth, List<Line> byAgent, List<Line> byMarket) {
 
     /** How wide the label column of a line is, in characters. */
     private static final int LABEL_WIDTH = 16;
@@ -56,6 +60,7 @@ public record Savings(String currency, Line overall, List<Line> byMonth, List<Li
         Objects.requireNonNull(overall, "overall");
         byMonth = List.copyOf(byMonth);
         byAgent = List.copyOf(byAgent);
+        byMarket = List.copyOf(byMarket);
     }
 
     /** The overall line, which is what the report reads back as. */
@@ -133,49 +138,52 @@ public record Savings(String currency, Line overall, List<Line> byMonth, List<Li
     }
 
     /**
-     * Every number, over a window, grouped the two ways the desk asks for.
+     * Every number, over a window, grouped the three ways the desk asks for.
      *
      * <p>The window takes the recommendations raised on or after {@code first} and on or before {@code
-     * last}, either end open when absent. They are grouped by the month they were raised, and by whoever
-     * settled them: a person, or {@code the clock} for the expired ones. An open one belongs to no
-     * agent, and neither does a superseded one, because nobody decided it.
+     * last}, either end open when absent. They are grouped by the month they were raised, by whoever
+     * settled them, and by the market watched. Whoever settled them is a person, or {@code the clock}
+     * for the expired ones; an open one belongs to no agent, and neither does a superseded one,
+     * because nobody decided it. The market is the two cities of the series, such as {@code FRA-NYC},
+     * which is the line a carrier's account manager asks about first.
      */
     public static Savings build(
             Iterable<Recommendation> recommendations,
             String currency,
             Optional<LocalDate> first,
             Optional<LocalDate> last) {
-        List<Recommendation> rows = new ArrayList<>();
-        for (Recommendation made : recommendations) {
-            boolean early = first.isPresent() && made.raisedOn().isBefore(first.get());
-            boolean late = last.isPresent() && made.raisedOn().isAfter(last.get());
-            if (!early && !late) {
-                rows.add(made);
-            }
-        }
-
-        Map<String, List<Recommendation>> months = new LinkedHashMap<>();
-        Map<String, List<Recommendation>> agents = new LinkedHashMap<>();
-        for (Recommendation row : rows) {
-            months.computeIfAbsent(month(row.raisedOn()), key -> new ArrayList<>())
-                    .add(row);
-            if (row.state() == State.SUPERSEDED) {
-                // Nobody decided this one, so nobody owns it.
-                continue;
-            }
-            if (row.state().isSettled() && !row.decidedBy().isEmpty()) {
-                agents.computeIfAbsent(row.decidedBy(), key -> new ArrayList<>())
-                        .add(row);
-            }
-        }
+        List<Recommendation> rows = StreamSupport.stream(recommendations.spliterator(), false)
+                .filter(made -> first.isEmpty() || !made.raisedOn().isBefore(first.get()))
+                .filter(made -> last.isEmpty() || !made.raisedOn().isAfter(last.get()))
+                .toList();
 
         return new Savings(
-                currency, line("overall", rows, currency), grouped(months, currency), grouped(agents, currency));
+                currency,
+                line("overall", rows, currency),
+                grouped(rows, row -> Optional.of(month(row.raisedOn())), currency),
+                grouped(rows, Savings::settledBy, currency),
+                grouped(rows, row -> Optional.of(market(row.seriesKey())), currency));
+    }
+
+    /** Who settled a recommendation, or nobody when it is open, superseded, or settled unnamed. */
+    private static Optional<String> settledBy(Recommendation row) {
+        if (row.state() == State.SUPERSEDED
+                || !row.state().isSettled()
+                || row.decidedBy().isEmpty()) {
+            return Optional.empty();
+        }
+        return Optional.of(row.decidedBy());
+    }
+
+    /** The two cities of a series: {@code FRA-NYC}. */
+    private static String market(String seriesKey) {
+        Series.Reading read = Series.read(seriesKey);
+        return read.origin() + Series.SEPARATOR + read.destination();
     }
 
     /**
-     * The report as the desk prints it: the heading, the figures, then a line per month and a line per
-     * agent, each section left out when it has nothing in it.
+     * The report as the desk prints it: the heading, the figures, then a line per month, per agent and
+     * per market, each section left out when it has nothing in it.
      */
     public static String render(Savings report) {
         Line overall = report.overall();
@@ -191,10 +199,17 @@ public record Savings(String currency, Line overall, List<Line> byMonth, List<Li
                         new Figure("open", overall.stillOpen()),
                         new Figure("take rate", overall.takeRate() + " over " + overall.decided() + " decided")),
                 Layout.section("by month", report.byMonth()),
-                Layout.section("by agent", report.byAgent()));
+                Layout.section("by agent", report.byAgent()),
+                Layout.section("by market", report.byMarket()));
     }
 
-    private static List<Line> grouped(Map<String, List<Recommendation>> groups, String currency) {
+    private static List<Line> grouped(
+            List<Recommendation> rows, Function<Recommendation, Optional<String>> by, String currency) {
+        Map<String, List<Recommendation>> groups = new LinkedHashMap<>();
+        for (Recommendation row : rows) {
+            by.apply(row).ifPresent(found -> groups.computeIfAbsent(found, unused -> new ArrayList<>())
+                    .add(row));
+        }
         return groups.keySet().stream()
                 .sorted(Text.CODE_POINT_ORDER)
                 .map(key -> line(key, groups.get(key), currency))

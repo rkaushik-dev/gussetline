@@ -142,6 +142,11 @@ public final class Engine {
 
         List<FareComponent> priced = new ArrayList<>();
         List<String> refused = new ArrayList<>();
+        for (String tight : itinerary.shortConnections()) {
+            String refusal = "connection under the minimum at " + tight;
+            trail.failedStep(Stage.RULE, refusal);
+            refused.add(refusal);
+        }
         boolean oneWay = kind == JourneyType.ONE_WAY && components.size() == 1;
         for (FareComponent component : components) {
             Charged built =

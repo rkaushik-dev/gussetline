@@ -11,6 +11,7 @@ import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -164,6 +165,45 @@ public final class Itinerary implements Iterable<Element> {
                 found.add(new Break(left.destination(), arrived, departs, stopover));
             } else {
                 found.add(new Break(left.destination(), arrivalOf(index), departureOf(index + 1), true));
+            }
+        }
+        return List.copyOf(found);
+    }
+
+    /**
+     * The break after an element when it and the next one are both flown, which is the only kind of
+     * break a passenger connects through. Empty after a surface sector, before one, and after the
+     * last element.
+     *
+     * @throws ValidationError as {@link #breaks()} does
+     */
+    public Optional<Break> connectionAfter(int index) {
+        if (index < 0
+                || index >= elements.size() - 1
+                || !(elements.get(index) instanceof Segment)
+                || !(elements.get(index + 1) instanceof Segment)) {
+            return Optional.empty();
+        }
+        return Optional.of(breaks().get(index));
+    }
+
+    /**
+     * Every connection between two flown sectors shorter than the airport's minimum ({@link
+     * MinimumConnectingTime#between}), in order, each as {@code LHR 35 minutes, 90 needed}. Empty
+     * when every connection can be made.
+     */
+    public List<String> shortConnections() {
+        List<String> found = new ArrayList<>();
+        for (int index = 0; index < elements.size() - 1; index++) {
+            Optional<Break> ground = connectionAfter(index);
+            if (ground.isEmpty()) {
+                continue;
+            }
+            Duration needed =
+                    MinimumConnectingTime.between((Segment) elements.get(index), (Segment) elements.get(index + 1));
+            if (ground.get().duration().compareTo(needed) < 0) {
+                found.add(ground.get().point() + " " + ground.get().minutes() + " minutes, " + needed.toMinutes()
+                        + " needed");
             }
         }
         return List.copyOf(found);

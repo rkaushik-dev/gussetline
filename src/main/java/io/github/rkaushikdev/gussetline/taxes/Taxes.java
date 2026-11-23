@@ -93,7 +93,6 @@ public final class Taxes {
     public static List<AppliedTax> assess(Itinerary itinerary, Money base, TaxTable table, Passenger passenger) {
         Charges owed = new Charges(base, itinerary.turnaroundIndex(), passenger.kind(), itinerary.isInternational());
         List<Element> elements = itinerary.elements();
-        List<Break> breaks = itinerary.breaks();
 
         for (int index = 0; index < elements.size(); index++) {
             Element element = elements.get(index);
@@ -102,9 +101,8 @@ public final class Taxes {
             }
             String departing = element.origin();
             String arriving = element.destination();
-            Optional<Break> before = index == 0 ? Optional.empty() : flownBreak(elements, breaks, index - 1);
-            Optional<Break> after =
-                    index == elements.size() - 1 ? Optional.empty() : flownBreak(elements, breaks, index);
+            Optional<Break> before = itinerary.connectionAfter(index - 1);
+            Optional<Break> after = itinerary.connectionAfter(index);
 
             for (TaxRule rule : table.forCountry(Geography.airportOrCityCountry(departing))) {
                 if (dueOn(rule, element, true) && !inTransit(rule, before)) {
@@ -300,17 +298,6 @@ public final class Taxes {
         return rule.exemptTransit()
                 && ground.isPresent()
                 && ground.get().duration().compareTo(Duration.ofHours(rule.transitHours())) <= 0;
-    }
-
-    /**
-     * The break between an element and the next one, when both are flown. A surface sector is never a
-     * transit, whatever the clock says, so a break next to one comes back empty.
-     */
-    private static Optional<Break> flownBreak(List<Element> elements, List<Break> breaks, int index) {
-        if (elements.get(index) instanceof Segment && elements.get(index + 1) instanceof Segment) {
-            return Optional.of(breaks.get(index));
-        }
-        return Optional.empty();
     }
 
     /**

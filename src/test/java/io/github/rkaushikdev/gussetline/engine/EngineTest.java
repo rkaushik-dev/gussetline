@@ -30,6 +30,7 @@ import io.github.rkaushikdev.gussetline.tariff.Fare;
 import io.github.rkaushikdev.gussetline.tariff.TariffStore;
 import io.github.rkaushikdev.gussetline.trace.Stage;
 import io.github.rkaushikdev.gussetline.trace.Step;
+import io.github.rkaushikdev.gussetline.trace.Trace;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
@@ -135,6 +136,26 @@ class EngineTest {
                 Tariffs.builder(new TariffStore()).miles(transatlanticMiles).build();
         assertThatThrownBy(() -> price(roundTrip(), empty, flatConverter, TICKETING, "EUR"))
                 .isInstanceOf(NoFareFound.class);
+    }
+
+    @Test
+    void aConnectionUnderTheMinimumPricesButIsNotIssuable() {
+        TariffStore fares = faresOf(oneWayFare("FRA", "JFK", "420.00"));
+        Itinerary rushed = new Itinerary(List.of(
+                segment("LH", "992", "FRA", "LHR", "2025-03-04 07:00", "2025-03-04 07:40"),
+                segment("LH", "400", "LHR", "JFK", "2025-03-04 08:20", "2025-03-04 11:00")));
+        Trace trace = new Trace("rushed");
+        Priced result = price(
+                rushed,
+                Tariffs.builder(fares).miles(transatlanticMiles).build(),
+                flatConverter,
+                TICKETING,
+                "EUR",
+                Optional.empty(),
+                Optional.of(trace));
+        assertThat(result.refusals()).containsExactly("connection under the minimum at LHR 40 minutes, 90 needed");
+        assertThat(result.issuable()).isFalse();
+        assertThat(trace.steps()).anyMatch(step -> step.message().startsWith("connection under the minimum"));
     }
 
     @Test

@@ -213,4 +213,54 @@ class ItineraryTest {
         }
         assertThat(origins).containsExactly("FRA", "JFK");
     }
+
+    private static Itinerary through(String point, String lands, String leaves, String from, String to) {
+        return new Itinerary(List.of(
+                segment("LH", "1", from, point, "2025-03-04 06:00", "2025-03-04 " + lands),
+                segment("LH", "2", point, to, "2025-03-04 " + leaves, "2025-03-04 23:00")));
+    }
+
+    @Test
+    void aConnectionUnderTheAirportsMinimumIsNamed() {
+        // Heathrow wants an hour and a half when either sector crosses a border.
+        assertThat(through("LHR", "08:00", "09:00", "FRA", "JFK").shortConnections())
+                .containsExactly("LHR 60 minutes, 90 needed");
+        assertThat(through("LHR", "08:00", "09:30", "FRA", "JFK").shortConnections())
+                .isEmpty();
+    }
+
+    @Test
+    void aDomesticConnectionReadsTheShorterMinimum() {
+        // Munich asks thirty minutes between two German sectors and forty five across a border.
+        assertThat(through("MUC", "08:00", "08:40", "FRA", "HAM").shortConnections())
+                .isEmpty();
+        assertThat(through("MUC", "08:00", "08:40", "FRA", "VIE").shortConnections())
+                .containsExactly("MUC 40 minutes, 45 needed");
+    }
+
+    @Test
+    void anAirportWithNothingFiledReadsTheCommonMinimums() {
+        assertThat(MinimumConnectingTime.between(
+                        segment("UA", "1", "LAX", "DEN", "2025-03-04 06:00", "2025-03-04 09:00"),
+                        segment("UA", "2", "DEN", "SFO", "2025-03-04 10:00", "2025-03-04 11:30")))
+                .isEqualTo(MinimumConnectingTime.DOMESTIC_DEFAULT);
+        assertThat(MinimumConnectingTime.between(
+                        segment("UA", "1", "LAX", "DEN", "2025-03-04 06:00", "2025-03-04 09:00"),
+                        segment("AC", "2", "DEN", "YYZ", "2025-03-04 10:00", "2025-03-04 15:30")))
+                .isEqualTo(MinimumConnectingTime.INTERNATIONAL_DEFAULT);
+    }
+
+    @Test
+    void aStopoverOrASurfaceBreakIsNoConnectionToMake() {
+        Itinerary overland = new Itinerary(List.of(
+                segment("LH", "1", "FRA", "LHR", "2025-03-04 06:00", "2025-03-04 07:00"),
+                surface("LHR", "LGW"),
+                segment("BA", "2", "LGW", "JFK", "2025-03-04 07:10", "2025-03-04 10:00")));
+        assertThat(overland.shortConnections()).isEmpty();
+        assertThat(overland.connectionAfter(0)).isEmpty();
+        assertThat(overland.connectionAfter(1)).isEmpty();
+        assertThat(overland.connectionAfter(-1)).isEmpty();
+        assertThat(withAConnection().connectionAfter(0)).map(Break::point).contains("LHR");
+        assertThat(withAConnection().connectionAfter(1)).isEmpty();
+    }
 }

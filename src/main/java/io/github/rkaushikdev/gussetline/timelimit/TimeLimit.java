@@ -21,7 +21,8 @@ import java.util.Optional;
  * airport. The desk's whole reason for holding anything is to reissue at a better fare, so the
  * deadline is the one date it cannot get wrong.
  *
- * <p>Three separate clocks decide it and the earliest of them wins.
+ * <p>Three separate clocks decide it, a fourth when the booking is made late, and the earliest of
+ * them wins.
  *
  * <p>The rule's own hold, from category 5: so many days after the booking was made. That is the one
  * everybody knows about.
@@ -29,6 +30,9 @@ import java.util.Optional;
  * <p>The advance purchase backstop, also category 5: so many days before departure, whatever the
  * hold says. A booking made four months out with a seven day hold and a twenty one day backstop is
  * ticketed within a week, not three months later.
+ *
+ * <p>The late booking rule, category 5 again: a booking made within so many days of departure is
+ * held for less, often only until the end of the day it was made.
  *
  * <p>And the departure itself, which needs no rule: a ticket issued after the flight has gone is not
  * a ticket. It is the clock nobody files because nobody imagines needing to, and it is the one that
@@ -65,7 +69,7 @@ public record TimeLimit(LocalDateTime at, Clock clock, LocalDate booked, LocalDa
      * @throws ValidationError when the booking was made after the flight
      */
     public static TimeLimit limitFor(LocalDate booked, LocalDate departure) {
-        return limitFor(booked, departure, Optional.empty(), Optional.empty(), false, DEFAULT_HOUR);
+        return limitFor(booked, departure, TicketingTerms.none());
     }
 
     /**
@@ -74,7 +78,7 @@ public record TimeLimit(LocalDateTime at, Clock clock, LocalDate booked, LocalDa
      * @throws ValidationError when the booking was made after the flight or the hold is negative
      */
     public static TimeLimit limitFor(LocalDate booked, LocalDate departure, int holdDays) {
-        return limitFor(booked, departure, Optional.of(holdDays), Optional.empty(), false, DEFAULT_HOUR);
+        return limitFor(booked, departure, TicketingTerms.none().withHold(holdDays));
     }
 
     /**
@@ -84,56 +88,50 @@ public record TimeLimit(LocalDateTime at, Clock clock, LocalDate booked, LocalDa
      * @throws ValidationError when the booking was made after the flight or either count is negative
      */
     public static TimeLimit limitFor(LocalDate booked, LocalDate departure, int holdDays, int ticketByDaysBefore) {
-        return limitFor(booked, departure, Optional.of(holdDays), Optional.of(ticketByDaysBefore), false, DEFAULT_HOUR);
+        return limitFor(
+                booked, departure, TicketingTerms.none().withHold(holdDays).withBackstop(ticketByDaysBefore));
     }
 
     /**
-     * The earliest of the three clocks, and which one it was.
+     * The earliest of the clocks the terms file, and which one it was.
      *
      * <p>A backstop that falls before the booking was made falls on the booking day instead. A tie
      * goes to a filed clock: an agent asking why a booking is due today wants the rule that says so,
-     * not the calendar fact that the flight is also today. Between the hold and the backstop on the
-     * same day, the hold is named.
+     * not the calendar fact that the flight is also today. Between filed clocks on the same day, the
+     * hold is named, then the backstop, then the late booking rule.
      *
-     * <p>{@code instant} is the other shape of category 5, where the ticket is issued on booking. It
+     * <p>The late booking rule is the one that catches a booking made a few days out on a fare with a
+     * long hold: within so many days of departure the hold shrinks to the one the rule gives late
+     * bookings, and a booking made outside that window never reads it at all.
+     *
+     * <p>Instant purchase is the other shape of category 5, where the ticket is issued on booking. It
      * beats everything, because a booking that was never held has no deadline to miss: it is either
-     * paid for now or it does not exist. Neither count is looked at then.
+     * paid for now or it does not exist. No count is looked at then.
      *
-     * @param holdDays days after booking the hold lasts, when the rule has one
-     * @param ticketByDaysBefore days before departure the ticket has to be issued, when the rule has a
-     *     backstop
-     * @param instant whether the ticket is issued on booking
-     * @param hour the hour of the day the deadline falls at
-     * @throws ValidationError when the booking was made after the flight, the hour is not one of the
-     *     day's, or a count is negative
+     * @throws ValidationError when the booking was made after the flight
      */
-    public static TimeLimit limitFor(
-            LocalDate booked,
-            LocalDate departure,
-            Optional<Integer> holdDays,
-            Optional<Integer> ticketByDaysBefore,
-            boolean instant,
-            int hour) {
+    public static TimeLimit limitFor(LocalDate booked, LocalDate departure, TicketingTerms terms) {
         if (departure.isBefore(booked)) {
             throw new ValidationError(
                     "a booking is made before it flies",
                     Details.of("booked", booked.toString(), "departure", departure.toString()));
         }
-        if (hour < 0 || hour > 23) {
-            throw new ValidationError("that is not an hour of the day", Details.of("hour", hour));
-        }
-
-        if (instant) {
+        int hour = terms.hour();
+        if (terms.instant()) {
             return new TimeLimit(booked.atTime(hour, 0), Clock.IMMEDIATE, booked, departure);
         }
 
         List<Candidate> candidates = new ArrayList<>();
         candidates.add(new Candidate(departure, Clock.DEPARTURE));
-        holdDays.ifPresent(days -> candidates.add(new Candidate(booked.plusDays(days(days, "hold")), Clock.HOLD)));
-        ticketByDaysBefore.ifPresent(days -> {
-            LocalDate backstop = departure.minusDays(days(days, "backstop"));
+        terms.holdDays().ifPresent(days -> candidates.add(new Candidate(booked.plusDays(days), Clock.HOLD)));
+        terms.ticketByDaysBefore().ifPresent(days -> {
+            LocalDate backstop = departure.minusDays(days);
             candidates.add(new Candidate(backstop.isBefore(booked) ? booked : backstop, Clock.ADVANCE_PURCHASE));
         });
+        terms.lateBooking()
+                .filter(late -> late.applies(ChronoUnit.DAYS.between(booked, departure)))
+                .ifPresent(late ->
+                        candidates.add(new Candidate(booked.plusDays(late.ticketWithinDays()), Clock.LATE_BOOKING)));
 
         Candidate earliest = candidates.stream()
                 .min(Comparator.comparing(Candidate::day)
@@ -210,13 +208,6 @@ public record TimeLimit(LocalDateTime at, Clock clock, LocalDate booked, LocalDa
     @Override
     public String toString() {
         return WRITTEN.format(at) + " by " + clock.value();
-    }
-
-    private static int days(int value, String what) {
-        if (value < 0) {
-            throw new ValidationError("a " + what + " is not negative", Details.of("days", value));
-        }
-        return value;
     }
 
     /** One clock's answer, before the earliest is picked. */

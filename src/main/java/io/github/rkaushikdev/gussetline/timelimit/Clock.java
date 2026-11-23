@@ -4,6 +4,7 @@ package io.github.rkaushikdev.gussetline.timelimit;
 public enum Clock {
     HOLD("the hold on the booking"),
     ADVANCE_PURCHASE("the advance purchase backstop"),
+    LATE_BOOKING("the late booking rule"),
     DEPARTURE("the departure itself"),
     IMMEDIATE("instant purchase");
 

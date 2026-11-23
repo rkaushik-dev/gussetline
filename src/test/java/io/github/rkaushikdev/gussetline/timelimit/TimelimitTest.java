@@ -1,6 +1,5 @@
 package io.github.rkaushikdev.gussetline.timelimit;
 
-import static io.github.rkaushikdev.gussetline.timelimit.TimeLimit.DEFAULT_HOUR;
 import static io.github.rkaushikdev.gussetline.timelimit.TimeLimit.fallingBy;
 import static io.github.rkaushikdev.gussetline.timelimit.TimeLimit.limitFor;
 import static io.github.rkaushikdev.gussetline.timelimit.TimeLimit.soonest;
@@ -61,17 +60,82 @@ class TimelimitTest {
 
     @Test
     void aBackstopAlreadyBehindUsDoesNotFallBeforeTheBooking() {
-        TimeLimit limit =
-                limitFor(LocalDate.of(2026, 3, 1), DEPARTURE, Optional.empty(), Optional.of(21), false, DEFAULT_HOUR);
+        TimeLimit limit = limitFor(
+                LocalDate.of(2026, 3, 1), DEPARTURE, TicketingTerms.none().withBackstop(21));
         assertThat(limit.on()).isEqualTo(LocalDate.of(2026, 3, 1));
     }
 
     @Test
     void instantPurchaseBeatsEverything() {
         // A booking that was never held has no deadline to miss.
-        TimeLimit limit = limitFor(BOOKED, DEPARTURE, Optional.of(7), Optional.empty(), true, DEFAULT_HOUR);
+        TimeLimit limit =
+                limitFor(BOOKED, DEPARTURE, TicketingTerms.none().withHold(7).withInstant(true));
         assertThat(limit.on()).isEqualTo(BOOKED);
         assertThat(limit.clock()).isSameAs(Clock.IMMEDIATE);
+    }
+
+    @Test
+    void aLateBookingIsHeldOnlyAsLongAsTheLateRuleSays() {
+        // Booked five days out on a fare with a seven day hold: the late booking rule gives one day.
+        LocalDate fiveOut = LocalDate.of(2026, 3, 5);
+        TimeLimit limit =
+                limitFor(fiveOut, DEPARTURE, TicketingTerms.none().withHold(7).withLateBooking(7, 1));
+        assertThat(limit.on()).isEqualTo(LocalDate.of(2026, 3, 6));
+        assertThat(limit.clock()).isSameAs(Clock.LATE_BOOKING);
+        assertThat(limit).hasToString("2026-03-06 23:00 by the late booking rule");
+    }
+
+    @Test
+    void aBookingOutsideTheLateWindowNeverReadsTheLateRule() {
+        TimeLimit limit =
+                limitFor(BOOKED, DEPARTURE, TicketingTerms.none().withHold(7).withLateBooking(7, 0));
+        assertThat(limit.on()).isEqualTo(BOOKED.plusDays(7));
+        assertThat(limit.clock()).isSameAs(Clock.HOLD);
+    }
+
+    @Test
+    void theLateWindowCountsTheDayItEndsOn() {
+        LocalDate sevenOut = LocalDate.of(2026, 3, 3);
+        TimeLimit limit = limitFor(sevenOut, DEPARTURE, TicketingTerms.none().withLateBooking(7, 0));
+        assertThat(limit.on()).isEqualTo(sevenOut);
+        assertThat(limit.clock()).isSameAs(Clock.LATE_BOOKING);
+        LocalDate eightOut = LocalDate.of(2026, 3, 2);
+        assertThat(limitFor(eightOut, DEPARTURE, TicketingTerms.none().withLateBooking(7, 0))
+                        .clock())
+                .isSameAs(Clock.DEPARTURE);
+    }
+
+    @Test
+    void aHoldOnTheSameDayAsTheLateRuleIsNamedFirst() {
+        LocalDate fiveOut = LocalDate.of(2026, 3, 5);
+        TimeLimit limit =
+                limitFor(fiveOut, DEPARTURE, TicketingTerms.none().withHold(1).withLateBooking(7, 1));
+        assertThat(limit.clock()).isSameAs(Clock.HOLD);
+    }
+
+    @Test
+    void instantPurchaseBeatsTheLateRuleToo() {
+        TimeLimit limit = limitFor(
+                LocalDate.of(2026, 3, 5),
+                DEPARTURE,
+                TicketingTerms.none().withLateBooking(7, 1).withInstant(true));
+        assertThat(limit.clock()).isSameAs(Clock.IMMEDIATE);
+    }
+
+    @Test
+    void aNegativeLateBookingCountIsRefused() {
+        assertThatThrownBy(() -> TicketingTerms.none().withLateBooking(-1, 0))
+                .isInstanceOf(ValidationError.class)
+                .hasMessageContaining("late booking window");
+        assertThatThrownBy(() -> TicketingTerms.none().withLateBooking(7, -1))
+                .isInstanceOf(ValidationError.class)
+                .hasMessageContaining("late booking hold");
+    }
+
+    @Test
+    void theLateRuleIsAFiledClockAndReadsBackByName() {
+        assertThat(Clock.LATE_BOOKING.isFiled()).isTrue();
+        assertThat(Clock.of("the late booking rule")).isSameAs(Clock.LATE_BOOKING);
     }
 
     @Test
@@ -91,7 +155,7 @@ class TimelimitTest {
 
     @Test
     void theHourCanBeNamedByACarrierThatSaysSo() {
-        assertThat(limitFor(BOOKED, DEPARTURE, Optional.of(7), Optional.empty(), false, 12)
+        assertThat(limitFor(BOOKED, DEPARTURE, TicketingTerms.none().withHold(7).at(12))
                         .at()
                         .getHour())
                 .isEqualTo(12);
@@ -99,7 +163,8 @@ class TimelimitTest {
 
     @Test
     void anHourNobodyHasIsRefused() {
-        assertThatThrownBy(() -> limitFor(BOOKED, DEPARTURE, Optional.of(7), Optional.empty(), false, 25))
+        assertThatThrownBy(() -> limitFor(
+                        BOOKED, DEPARTURE, TicketingTerms.none().withHold(7).at(25)))
                 .isInstanceOf(ValidationError.class)
                 .hasMessageContaining("hour of the day");
     }
@@ -120,7 +185,8 @@ class TimelimitTest {
 
     @Test
     void aNegativeBackstopIsRefused() {
-        assertThatThrownBy(() -> limitFor(BOOKED, DEPARTURE, Optional.empty(), Optional.of(-1), false, DEFAULT_HOUR))
+        assertThatThrownBy(
+                        () -> limitFor(BOOKED, DEPARTURE, TicketingTerms.none().withBackstop(-1)))
                 .isInstanceOf(ValidationError.class)
                 .hasMessageContaining("backstop is not negative");
     }

@@ -13,7 +13,6 @@ import io.github.rkaushikdev.gussetline.offers.Baggage;
 import io.github.rkaushikdev.gussetline.offers.Offer;
 import io.github.rkaushikdev.gussetline.offers.PriceBreakdown;
 import io.github.rkaushikdev.gussetline.taxes.AppliedTax;
-import io.github.rkaushikdev.gussetline.taxes.Taxes;
 import io.github.rkaushikdev.gussetline.util.Numbers;
 import java.math.BigDecimal;
 import java.time.DateTimeException;
@@ -224,8 +223,7 @@ public final class Gds {
     }
 
     private static AppliedTax tax(Record record) {
-        String code = record.get("code", String.class);
-        return new AppliedTax(code, money(record), "", Taxes.CARRIER_IMPOSED.contains(code));
+        return AppliedTax.asSent(record.get("code", String.class), money(record), "");
     }
 
     private static Money money(Record record) {

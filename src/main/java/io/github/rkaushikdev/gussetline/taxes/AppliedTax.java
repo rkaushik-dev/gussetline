@@ -31,6 +31,20 @@ public record AppliedTax(String code, Money amount, String point, String descrip
         this(code, amount, point, "", carrierImposed);
     }
 
+    /**
+     * A tax as a supplier lists it: a code, an amount and perhaps a point. No supplier says whether
+     * a code is carrier money, so that is read off the code ({@link Taxes#CARRIER_IMPOSED}), the same
+     * way for every feed.
+     */
+    public static AppliedTax asSent(String code, Money amount, String point) {
+        return new AppliedTax(code, amount, point, Taxes.CARRIER_IMPOSED.contains(code));
+    }
+
+    /** The same tax at the same point, owed as another amount, such as the same duty in euro. */
+    public AppliedTax withAmount(Money restated) {
+        return new AppliedTax(code, restated, point, description, carrierImposed);
+    }
+
     /** The code and the amount: {@code DE 70.83 EUR}. */
     @Override
     public String toString() {

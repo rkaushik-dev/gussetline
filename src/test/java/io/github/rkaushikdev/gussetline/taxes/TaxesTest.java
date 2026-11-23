@@ -12,9 +12,13 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import io.github.rkaushikdev.gussetline.ValidationError;
 import io.github.rkaushikdev.gussetline.discounts.Passenger;
 import io.github.rkaushikdev.gussetline.discounts.PassengerType;
+import io.github.rkaushikdev.gussetline.exchange.Converter;
+import io.github.rkaushikdev.gussetline.exchange.RateTable;
 import io.github.rkaushikdev.gussetline.itinerary.Itinerary;
 import io.github.rkaushikdev.gussetline.money.Money;
+import io.github.rkaushikdev.gussetline.offers.PriceBreakdown;
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
@@ -480,6 +484,80 @@ class TaxesTest {
     void theTotalsAreZeroWhenNothingIsOwed() {
         assertThat(governmentTotal(List.of(), "EUR")).isEqualTo(Money.zero("EUR"));
         assertThat(carrierTotal(List.of(), "EUR")).isEqualTo(Money.zero("EUR"));
+    }
+
+    /** Sterling at four fifths of a neutral unit and the euro at one, on the bankers rate only. */
+    private static Converter bankers() {
+        RateTable roe = new RateTable("roe");
+        RateTable bsr = new RateTable("bsr");
+        for (RateTable table : List.of(roe, bsr)) {
+            table.add("EUR", LocalDate.of(2025, 1, 1), "1.000");
+        }
+        roe.add("GBP", LocalDate.of(2025, 1, 1), "0.900");
+        bsr.add("GBP", LocalDate.of(2025, 1, 1), "0.800");
+        return new Converter(roe, bsr);
+    }
+
+    private static Itinerary overLondon() {
+        return new Itinerary(List.of(
+                segment("LH", "992", "FRA", "LHR", "2025-03-04 07:00", "2025-03-04 07:40"),
+                segment("LH", "400", "LHR", "JFK", "2025-03-06 11:05", "2025-03-06 14:00")));
+    }
+
+    @Test
+    void aTaxIsRestatedOnTheBankersRateAndKeepsWhatItWasFor() {
+        AppliedTax duty = new AppliedTax("GB", Money.of("88.00", "GBP"), "LHR", "UK air passenger duty", false);
+        List<AppliedTax> restated = Taxes.inCurrency(List.of(duty), "EUR", bankers(), LocalDate.of(2025, 3, 1));
+        assertThat(restated)
+                .containsExactly(
+                        new AppliedTax("GB", Money.of("110.00", "EUR"), "LHR", "UK air passenger duty", false));
+    }
+
+    @Test
+    void aTaxAlreadyInTheCurrencyIsKeptAsItIs() {
+        AppliedTax german = new AppliedTax("DE", Money.of("70.83", "EUR"), "FRA");
+        assertThat(Taxes.inCurrency(List.of(german), "EUR", bankers(), LocalDate.of(2025, 3, 1)))
+                .containsExactly(german);
+    }
+
+    @Test
+    void aQuoteOverTwoCountriesAddsUpInTheFaresCurrency() {
+        PriceBreakdown quoted = Taxes.quote(
+                overLondon(),
+                Money.of("500", "EUR"),
+                defaultTaxTable(),
+                new Passenger(PassengerType.ADULT),
+                bankers(),
+                LocalDate.of(2025, 3, 1));
+        assertThat(quoted.taxCodes()).containsExactly("DE", "GB", "RA", "UB", "YQ");
+        // 70.83 + 10.00 in euro, then 88.00 and 31.30 sterling at 0.8: 110.00 and 39.13 (39.125 up).
+        assertThat(quoted.taxTotal()).isEqualTo(Money.of("229.96", "EUR"));
+        assertThat(quoted.surchargeTotal()).isEqualTo(Money.of("180.00", "EUR"));
+        assertThat(quoted.computedTotal()).isEqualTo(Money.of("909.96", "EUR"));
+    }
+
+    @Test
+    void aQuoteWithNoBankersRateForATaxIsRefused() {
+        RateTable euroOnly = new RateTable("bsr");
+        euroOnly.add("EUR", LocalDate.of(2025, 1, 1), "1.000");
+        assertThatThrownBy(() -> Taxes.quote(
+                        overLondon(),
+                        Money.of("500", "EUR"),
+                        defaultTaxTable(),
+                        new Passenger(PassengerType.ADULT),
+                        new Converter(euroOnly),
+                        LocalDate.of(2025, 3, 1)))
+                .isInstanceOf(ValidationError.class);
+    }
+
+    @Test
+    void aSuppliersTaxIsCarrierMoneyByItsCode() {
+        assertThat(AppliedTax.asSent("YQ", Money.of("180", "EUR"), "").carrierImposed())
+                .isTrue();
+        assertThat(AppliedTax.asSent("YR", Money.of("20", "EUR"), "FRA").carrierImposed())
+                .isTrue();
+        assertThat(AppliedTax.asSent("DE", Money.of("70.83", "EUR"), "FRA").carrierImposed())
+                .isFalse();
     }
 
     @Test

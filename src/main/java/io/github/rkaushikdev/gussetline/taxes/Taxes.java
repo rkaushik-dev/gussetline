@@ -3,15 +3,18 @@ package io.github.rkaushikdev.gussetline.taxes;
 import io.github.rkaushikdev.gussetline.ValidationError;
 import io.github.rkaushikdev.gussetline.discounts.Passenger;
 import io.github.rkaushikdev.gussetline.discounts.PassengerType;
+import io.github.rkaushikdev.gussetline.exchange.Converter;
 import io.github.rkaushikdev.gussetline.flights.Segment;
 import io.github.rkaushikdev.gussetline.geography.Geography;
 import io.github.rkaushikdev.gussetline.itinerary.Break;
 import io.github.rkaushikdev.gussetline.itinerary.Element;
 import io.github.rkaushikdev.gussetline.itinerary.Itinerary;
 import io.github.rkaushikdev.gussetline.money.Money;
+import io.github.rkaushikdev.gussetline.offers.PriceBreakdown;
 import io.github.rkaushikdev.gussetline.util.Numbers;
 import java.math.BigDecimal;
 import java.time.Duration;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -138,20 +141,51 @@ public final class Taxes {
 
     /** Everything the government gets. Carrier surcharges are not in it. Nothing owed is zero. */
     public static Money governmentTotal(Iterable<AppliedTax> taxes, String currency) {
-        Money running = Money.zero(currency);
-        for (AppliedTax tax : taxes) {
-            if (!tax.carrierImposed()) {
-                running = running.plus(tax.amount());
-            }
-        }
-        return running;
+        return subtotal(taxes, currency, false);
     }
 
     /** Everything the carrier keeps through the tax box. Nothing owed is zero. */
     public static Money carrierTotal(Iterable<AppliedTax> taxes, String currency) {
+        return subtotal(taxes, currency, true);
+    }
+
+    /**
+     * Every tax restated in one currency on the bankers rate, in the order given, each keeping its
+     * code, point and description.
+     *
+     * <p>A journey from Frankfurt over London owes euro at one end and sterling at the other, and the
+     * passenger pays both in whatever the ticket is sold in. A tax goes through the bankers selling
+     * rate and never through the rate of exchange, because the rate of exchange is for fares; using it
+     * here is a one unit difference on every multi country ticket that nobody can reproduce. A tax
+     * already in the currency is kept as it is.
+     *
+     * @throws ValidationError when the bankers table holds no rate for a currency on the date
+     */
+    public static List<AppliedTax> inCurrency(
+            List<AppliedTax> taxes, String currency, Converter converter, LocalDate on) {
+        return taxes.stream()
+                .map(tax -> tax.withAmount(converter.convertTax(tax.amount(), currency, on)))
+                .toList();
+    }
+
+    /**
+     * The fare and everything owed on it as one breakdown in the fare's currency: the taxes assessed
+     * for the traveller, then restated on the bankers rate ({@link #inCurrency}).
+     *
+     * <p>This is the breakdown the desk compares a supplier's against. A supplier that charges the
+     * sterling duty at the fare's rate of exchange shows up as a discrepancy here rather than as a
+     * refusal to add sterling to euro.
+     */
+    public static PriceBreakdown quote(
+            Itinerary itinerary, Money base, TaxTable table, Passenger passenger, Converter converter, LocalDate on) {
+        List<AppliedTax> owed = assess(itinerary, base, table, passenger);
+        return new PriceBreakdown(base, inCurrency(owed, base.currency(), converter, on));
+    }
+
+    private static Money subtotal(Iterable<AppliedTax> taxes, String currency, boolean carrier) {
         Money running = Money.zero(currency);
         for (AppliedTax tax : taxes) {
-            if (tax.carrierImposed()) {
+            if (tax.carrierImposed() == carrier) {
                 running = running.plus(tax.amount());
             }
         }

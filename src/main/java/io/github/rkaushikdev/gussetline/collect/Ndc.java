@@ -14,7 +14,6 @@ import io.github.rkaushikdev.gussetline.offers.Baggage;
 import io.github.rkaushikdev.gussetline.offers.Offer;
 import io.github.rkaushikdev.gussetline.offers.PriceBreakdown;
 import io.github.rkaushikdev.gussetline.taxes.AppliedTax;
-import io.github.rkaushikdev.gussetline.taxes.Taxes;
 import io.github.rkaushikdev.gussetline.util.Numbers;
 import io.github.rkaushikdev.gussetline.util.Text;
 import io.github.rkaushikdev.gussetline.util.Times;
@@ -375,12 +374,10 @@ public final class Ndc {
             if (code.isEmpty() || amount.isEmpty()) {
                 continue;
             }
-            String text = Text.plain(code.get());
-            found.add(new AppliedTax(
-                    text,
+            found.add(AppliedTax.asSent(
+                    Text.plain(code.get()),
                     amount.get(),
-                    Text.plain(pick(entry, "point").orElse("")),
-                    Taxes.CARRIER_IMPOSED.contains(text)));
+                    Text.plain(pick(entry, "point").orElse(""))));
         }
         return found;
     }

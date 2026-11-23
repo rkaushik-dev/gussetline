@@ -4,7 +4,7 @@ import io.github.rkaushikdev.gussetline.Details;
 import io.github.rkaushikdev.gussetline.ValidationError;
 import io.github.rkaushikdev.gussetline.components.FareComponent;
 import io.github.rkaushikdev.gussetline.exchange.Converter;
-import io.github.rkaushikdev.gussetline.itinerary.Element;
+import io.github.rkaushikdev.gussetline.flights.Segment;
 import io.github.rkaushikdev.gussetline.tariff.Fare;
 import io.github.rkaushikdev.gussetline.trace.Stage;
 import io.github.rkaushikdev.gussetline.trace.Trace;
@@ -44,7 +44,8 @@ public final class Surcharges {
      * <p>Only the priced fare's carrier's filings are read, and only those whose travel window holds
      * the departure of the first flown sector. A component filing attaches when it covers the
      * component's two ends; a sector filing is charged once for every element it covers and not at
-     * all when it covers none. One charge is the filed amount in neutral units, truncated, and the
+     * all when it covers none. Either kind can be held to weekdays and booking classes ({@link
+     * QSurcharge#readsSector}). One charge is the filed amount in neutral units, truncated, and the
      * count multiplies it. Each charge is recorded as a passed {@link Stage#SURCHARGE} step with its
      * {@code times}.
      *
@@ -61,25 +62,9 @@ public final class Surcharges {
         List<AppliedSurcharge> found = new ArrayList<>();
 
         for (QSurcharge surcharge : table.forCarrier(fare.carrier())) {
-            if (!surcharge.flyableOn(departure)) {
+            int times = surcharge.flyableOn(departure) ? timesOwed(surcharge, component) : 0;
+            if (times == 0) {
                 continue;
-            }
-            int times;
-            if (surcharge.scope() == Scope.COMPONENT) {
-                if (!surcharge.covers(component.origin(), component.destination())) {
-                    continue;
-                }
-                times = 1;
-            } else {
-                times = 0;
-                for (Element element : component.elements()) {
-                    if (surcharge.covers(element.origin(), element.destination())) {
-                        times++;
-                    }
-                }
-                if (times == 0) {
-                    continue;
-                }
             }
             BigDecimal per = converter.toNuc(surcharge.amount(), ticketing);
             AppliedSurcharge applied =
@@ -89,6 +74,25 @@ public final class Surcharges {
         }
 
         return List.copyOf(found);
+    }
+
+    /**
+     * How many times one filing is owed on a component. A component filing is owed once when it
+     * covers the two ends and, when it names weekdays or booking classes, the first flown sector is
+     * one it reads. A sector filing is owed once for every element it covers that it also reads; a
+     * surface sector is read only by a filing that names neither.
+     */
+    private static int timesOwed(QSurcharge surcharge, FareComponent component) {
+        if (surcharge.scope() == Scope.COMPONENT) {
+            boolean owed = surcharge.covers(component.origin(), component.destination())
+                    && surcharge.readsSector(component.segments().get(0));
+            return owed ? 1 : 0;
+        }
+        return (int) component.elements().stream()
+                .filter(element -> surcharge.covers(element.origin(), element.destination()))
+                .filter(element ->
+                        element instanceof Segment sector ? surcharge.readsSector(sector) : !surcharge.isRestricted())
+                .count();
     }
 
     /** What the charges add up to, in neutral units. Nothing adds up to zero. */

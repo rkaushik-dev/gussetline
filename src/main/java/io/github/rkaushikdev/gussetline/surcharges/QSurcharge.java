@@ -3,11 +3,16 @@ package io.github.rkaushikdev.gussetline.surcharges;
 import io.github.rkaushikdev.gussetline.Details;
 import io.github.rkaushikdev.gussetline.ValidationError;
 import io.github.rkaushikdev.gussetline.carriers.Carriers;
+import io.github.rkaushikdev.gussetline.flights.Segment;
 import io.github.rkaushikdev.gussetline.geography.Geography;
 import io.github.rkaushikdev.gussetline.money.Money;
 import io.github.rkaushikdev.gussetline.tariff.Tariff;
+import io.github.rkaushikdev.gussetline.util.Text;
+import java.time.DayOfWeek;
 import java.time.LocalDate;
 import java.util.Objects;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * One filed Q surcharge and the market it attaches to.
@@ -26,6 +31,9 @@ import java.util.Objects;
  * @param directional whether it applies only from the origin to the destination
  * @param firstTravel the first day of travel it applies to
  * @param lastTravel the last day of travel it applies to
+ * @param days the weekdays a sector has to leave on for the filing to read it; empty for every day
+ * @param bookingClasses the booking classes a sector has to be sold in, upper case; empty for every
+ *     class
  */
 public record QSurcharge(
         String carrier,
@@ -36,7 +44,9 @@ public record QSurcharge(
         String reason,
         boolean directional,
         LocalDate firstTravel,
-        LocalDate lastTravel) {
+        LocalDate lastTravel,
+        Set<DayOfWeek> days,
+        Set<String> bookingClasses) {
 
     /** Where the travel window opens when nobody says otherwise. */
     private static final LocalDate EARLIEST = LocalDate.of(1900, 1, 1);
@@ -57,6 +67,8 @@ public record QSurcharge(
         Objects.requireNonNull(reason, "reason");
         Objects.requireNonNull(firstTravel, "firstTravel");
         Objects.requireNonNull(lastTravel, "lastTravel");
+        days = Set.copyOf(days);
+        bookingClasses = bookingClasses.stream().map(Text::code).collect(Collectors.toUnmodifiableSet());
 
         carrier = Carriers.normaliseCode(carrier);
         origin = Geography.cityOf(origin);
@@ -74,7 +86,18 @@ public record QSurcharge(
 
     /** A component surcharge under {@code Q}, either way round, with no travel window to speak of. */
     public QSurcharge(String carrier, String origin, String destination, Money amount) {
-        this(carrier, origin, destination, amount, Scope.COMPONENT, "Q", false, EARLIEST, Tariff.FAR_FUTURE);
+        this(
+                carrier,
+                origin,
+                destination,
+                amount,
+                Scope.COMPONENT,
+                "Q",
+                false,
+                EARLIEST,
+                Tariff.FAR_FUTURE,
+                Set.of(),
+                Set.of());
     }
 
     /** An empty builder: the carrier, both ends and the amount have to be set before it builds. */
@@ -105,6 +128,21 @@ public record QSurcharge(
         return !departure.isBefore(firstTravel) && !departure.isAfter(lastTravel);
     }
 
+    /**
+     * Whether a sector is one the filing reads: it leaves on one of the filed weekdays and is sold in
+     * one of the filed booking classes, either of which may be left open. A weekend surcharge filed
+     * for Friday and Sunday reads the Friday outbound and leaves the Tuesday one alone.
+     */
+    public boolean readsSector(Segment sector) {
+        return (days.isEmpty() || days.contains(sector.departure().getDayOfWeek()))
+                && (bookingClasses.isEmpty() || bookingClasses.contains(sector.bookingClass()));
+    }
+
+    /** Whether the filing names a weekday or a booking class, which a surface sector never has. */
+    public boolean isRestricted() {
+        return !days.isEmpty() || !bookingClasses.isEmpty();
+    }
+
     /** The reason, the market and the amount: {@code Q FRANYC 30.00 EUR}. */
     @Override
     public String toString() {
@@ -127,6 +165,8 @@ public record QSurcharge(
         private boolean directional;
         private LocalDate firstTravel = EARLIEST;
         private LocalDate lastTravel = Tariff.FAR_FUTURE;
+        private Set<DayOfWeek> days = Set.of();
+        private Set<String> bookingClasses = Set.of();
 
         private Builder() {}
 
@@ -175,6 +215,16 @@ public record QSurcharge(
             return this;
         }
 
+        public Builder days(DayOfWeek... days) {
+            this.days = Set.of(days);
+            return this;
+        }
+
+        public Builder bookingClasses(String... classes) {
+            this.bookingClasses = Set.of(classes);
+            return this;
+        }
+
         /**
          * The filing.
          *
@@ -183,7 +233,17 @@ public record QSurcharge(
          */
         public QSurcharge build() {
             return new QSurcharge(
-                    carrier, origin, destination, amount, scope, reason, directional, firstTravel, lastTravel);
+                    carrier,
+                    origin,
+                    destination,
+                    amount,
+                    scope,
+                    reason,
+                    directional,
+                    firstTravel,
+                    lastTravel,
+                    days,
+                    bookingClasses);
         }
     }
 }

@@ -3,6 +3,7 @@ package io.github.rkaushikdev.gussetline.surcharges;
 import static io.github.rkaushikdev.gussetline.Fixtures.fare;
 import static io.github.rkaushikdev.gussetline.Fixtures.flatConverter;
 import static io.github.rkaushikdev.gussetline.Fixtures.segment;
+import static io.github.rkaushikdev.gussetline.Fixtures.surface;
 import static io.github.rkaushikdev.gussetline.construction.Construction.priceComponent;
 import static io.github.rkaushikdev.gussetline.surcharges.Surcharges.applyAll;
 import static io.github.rkaushikdev.gussetline.surcharges.Surcharges.assessComponent;
@@ -16,6 +17,7 @@ import io.github.rkaushikdev.gussetline.exchange.Converter;
 import io.github.rkaushikdev.gussetline.money.Money;
 import io.github.rkaushikdev.gussetline.trace.Stage;
 import io.github.rkaushikdev.gussetline.trace.Trace;
+import java.time.DayOfWeek;
 import java.time.LocalDate;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -223,5 +225,89 @@ class SurchargesTest {
         table.add(charge().origin("FRA").destination("LHR").scope(Scope.SECTOR).build());
         List<AppliedSurcharge> applied = assessComponent(priced(connecting()), table, flatConverter, TICKETING);
         assertThat(applied.get(0)).hasToString("Q 30.00 NUC");
+    }
+
+    /** Frankfurt to London on Tuesday the fourth and back on Thursday the sixth, both booked in K. */
+    private FareComponent thereAndBack() {
+        FareComponent there = new FareComponent(List.of(
+                segment("LH", "992", "FRA", "LHR", "2025-03-04 07:00", "2025-03-04 07:40"),
+                segment("LH", "993", "LHR", "FRA", "2025-03-06 09:00", "2025-03-06 11:35")));
+        return priceComponent(there, fare("FRA", "LHR"), flatConverter, TICKETING);
+    }
+
+    private List<AppliedSurcharge> owed(FareComponent component, QSurcharge filing) {
+        SurchargeTable table = new SurchargeTable();
+        table.add(filing);
+        return assessComponent(component, table, flatConverter, TICKETING);
+    }
+
+    @Test
+    void aSectorSurchargeForSomeWeekdaysReadsOnlyTheSectorsLeavingThen() {
+        QSurcharge thursdays = charge().origin("FRA")
+                .destination("LHR")
+                .scope(Scope.SECTOR)
+                .days(DayOfWeek.THURSDAY)
+                .build();
+        assertThat(owed(thereAndBack(), thursdays).get(0).times()).isEqualTo(1);
+        QSurcharge weekends = charge().origin("FRA")
+                .destination("LHR")
+                .scope(Scope.SECTOR)
+                .days(DayOfWeek.SATURDAY, DayOfWeek.SUNDAY)
+                .build();
+        assertThat(owed(thereAndBack(), weekends)).isEmpty();
+    }
+
+    @Test
+    void aSurchargeForSomeBookingClassesReadsTheClassInAnyCase() {
+        QSurcharge inK = charge().origin("FRA")
+                .destination("LHR")
+                .scope(Scope.SECTOR)
+                .bookingClasses("k")
+                .build();
+        assertThat(inK.bookingClasses()).containsExactly("K");
+        assertThat(owed(thereAndBack(), inK).get(0).times()).isEqualTo(2);
+        QSurcharge inQ = charge().origin("FRA")
+                .destination("LHR")
+                .scope(Scope.SECTOR)
+                .bookingClasses("Q")
+                .build();
+        assertThat(owed(thereAndBack(), inQ)).isEmpty();
+    }
+
+    @Test
+    void aComponentSurchargeForSomeWeekdaysReadsTheFirstFlownSector() {
+        FareComponent tuesday = priced(direct());
+        assertThat(owed(tuesday, charge().days(DayOfWeek.FRIDAY).build())).isEmpty();
+        assertThat(owed(tuesday, charge().days(DayOfWeek.TUESDAY).build())).hasSize(1);
+        assertThat(owed(tuesday, charge().bookingClasses("K").build())).hasSize(1);
+    }
+
+    @Test
+    void aSurfaceSectorIsReadOnlyByAFilingThatNamesNoDayOrClass() {
+        FareComponent overland = priceComponent(
+                new FareComponent(List.of(
+                        segment("LH", "992", "FRA", "LHR", "2025-03-04 07:00", "2025-03-04 07:40"),
+                        surface("LHR", "MAN"),
+                        segment("EI", "203", "MAN", "DUB", "2025-03-06 09:00", "2025-03-06 10:00"))),
+                fare("FRA", "DUB"),
+                flatConverter,
+                TICKETING);
+        QSurcharge open =
+                charge().origin("LON").destination("MAN").scope(Scope.SECTOR).build();
+        assertThat(owed(overland, open).get(0).times()).isEqualTo(1);
+        QSurcharge tuesdays = charge().origin("LON")
+                .destination("MAN")
+                .scope(Scope.SECTOR)
+                .days(DayOfWeek.TUESDAY)
+                .build();
+        assertThat(owed(overland, tuesdays)).isEmpty();
+    }
+
+    @Test
+    void aFilingSaysWhetherItIsHeldToDaysOrClasses() {
+        assertThat(charge().build().isRestricted()).isFalse();
+        assertThat(charge().days(DayOfWeek.MONDAY).build().isRestricted()).isTrue();
+        assertThat(charge().bookingClasses("Y").build().isRestricted()).isTrue();
+        assertThat(charge().build().readsSector(direct().segments().get(0))).isTrue();
     }
 }

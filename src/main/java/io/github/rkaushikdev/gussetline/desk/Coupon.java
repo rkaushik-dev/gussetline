@@ -111,20 +111,19 @@ public record Coupon(
 
     /**
      * Whether this coupon is behind us, by status or by the calendar: used, or open and departed
-     * before today. Any other status has not been flown, however old the coupon is.
+     * before today. Any other status has not been flown, however old the coupon is, a no show
+     * included.
      *
      * <p>The status is authoritative when it says used, and the calendar is the fallback, because a
      * carrier that has not sent the used message yet has still flown the passenger and the penalty
      * band has moved.
      */
     public boolean flownBy(LocalDate today) {
-        if (status == CouponStatus.USED) {
-            return true;
-        }
-        if (!status.isOpen()) {
-            return false;
-        }
-        return departure.toLocalDate().isBefore(today);
+        return switch (status) {
+            case USED -> true;
+            case OPEN -> departure.toLocalDate().isBefore(today);
+            case EXCHANGED, REFUNDED, VOID, NO_SHOW -> false;
+        };
     }
 
     /** A copy on another flight number. */

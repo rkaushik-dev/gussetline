@@ -77,7 +77,9 @@ public final class Reprice {
      * </ol>
      *
      * <p>The fee is every change filing added up across the ticket's coupons on {@code today}, a fee
-     * filed as a percentage read off what the watch paid, nothing when none is chargeable. The benefit is the drop less the fee; a retained residual comes back as a
+     * filed as a percentage read off what the watch paid, nothing when none is chargeable. A ticket
+     * with a coupon the passenger did not show for pays the no show filings on top, and is {@link
+     * Verdict#NOT_CHANGEABLE} when one of them forfeits the ticket. The benefit is the drop less the fee; a retained residual comes back as a
      * credit and counts at {@code creditDiscount} of that, to the cent, half to even.
      *
      * <p>Then the hold. When the terms record what the ticket held carries, the fare offered is
@@ -122,9 +124,14 @@ public final class Reprice {
         Observation held = found.get();
 
         String currency = watch.paid().currency();
+        boolean missed = watch.ticket().hasNoShow();
         List<Penalty> changes = terms.penalties().stream()
-                .filter(penalty -> penalty.action() == Action.CHANGE)
+                .filter(penalty -> penalty.action() == Action.CHANGE || missed && penalty.action() == Action.NO_SHOW)
                 .toList();
+        if (changes.stream().anyMatch(penalty -> penalty.action() == Action.NO_SHOW && penalty.noShowForfeits())) {
+            return new Decision(
+                    Verdict.NOT_CHANGEABLE, watch, Residual.FORFEITED, "a no show forfeits the ticket on this fare");
+        }
         Money fee = Penalties.totalPenalty(
                         changes,
                         terms.context(),
@@ -217,13 +224,14 @@ public final class Reprice {
 
     /** Every watch a decision said will never become actionable, with the reason, in order. */
     public static List<Retirement> toRetire(List<Decision> decisions) {
-        List<Retirement> found = new ArrayList<>();
-        for (Decision decision : decisions) {
-            decision.verdict()
-                    .retiresTheWatch()
-                    .ifPresent(reason -> found.add(new Retirement(decision.watch(), reason)));
-        }
-        return List.copyOf(found);
+        return decisions.stream()
+                .flatMap(decision ->
+                        decision
+                                .verdict()
+                                .retiresTheWatch()
+                                .map(reason -> new Retirement(decision.watch(), reason))
+                                .stream())
+                .toList();
     }
 
     private static Decision priced(

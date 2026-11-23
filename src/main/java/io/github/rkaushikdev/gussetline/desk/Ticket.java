@@ -184,6 +184,11 @@ public record Ticket(
         return 0 < flown && flown < coupons.size();
     }
 
+    /** Whether the passenger failed to show for any coupon, which a change then pays for. */
+    public boolean hasNoShow() {
+        return coupons.stream().anyMatch(coupon -> coupon.status() == CouponStatus.NO_SHOW);
+    }
+
     /** Every coupon flown, so nothing is left to reprice. */
     public boolean isFinished(LocalDate today) {
         return openCoupons(today).isEmpty();

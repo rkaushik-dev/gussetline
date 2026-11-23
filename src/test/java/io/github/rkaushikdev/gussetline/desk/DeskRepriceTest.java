@@ -401,4 +401,63 @@ class DeskRepriceTest {
         assertThat(made.benefit()).contains(eur("56.00"));
         assertThat(made.verdict()).isSameAs(Verdict.REISSUE);
     }
+
+    /** A missed outbound from Frankfurt in June, and the open way home. */
+    private static Ticket missedTheOutbound() {
+        return ticket(List.of(
+                coupon(0, "FRA", "JFK", "2025-06-20 10:25").withStatus(CouponStatus.NO_SHOW),
+                coupon(1, "JFK", "FRA", "2025-07-04 18:30")));
+    }
+
+    private static Penalty noShowFee(boolean forfeits) {
+        return Penalty.builder()
+                .action(Action.NO_SHOW)
+                .beforeDeparture(eur("75.00"))
+                .noShowForfeits(forfeits)
+                .build();
+    }
+
+    @Test
+    void aChangeAfterAMissedSectorPaysTheNoShowFeeOnTop() {
+        Decision made = decide(
+                watch(missedTheOutbound(), SEEN, "10.00"),
+                refundable(),
+                List.of(change(), noShowFee(false)),
+                context(),
+                TODAY);
+        assertThat(made.penalty()).contains(eur("125.00"));
+        assertThat(made.benefit()).contains(eur("15.00"));
+        assertThat(made.verdict()).isSameAs(Verdict.REISSUE);
+    }
+
+    @Test
+    void aTicketWithNoNoShowIsNotChargedTheNoShowFee() {
+        Decision made = decide(watch(), refundable(), List.of(change(), noShowFee(false)), context(), TODAY);
+        assertThat(made.penalty()).contains(eur("50.00"));
+    }
+
+    @Test
+    void aNoShowThatForfeitsTheTicketLeavesNothingToChange() {
+        Decision made = decide(
+                watch(missedTheOutbound(), SEEN, "10.00"),
+                refundable(),
+                List.of(change(), noShowFee(true)),
+                context(),
+                TODAY);
+        assertThat(made.verdict()).isSameAs(Verdict.NOT_CHANGEABLE);
+        assertThat(made.reason()).contains("no show forfeits");
+        Decision kept = decide(watch(), refundable(), List.of(change(), noShowFee(true)), context(), TODAY);
+        assertThat(kept.verdict()).isSameAs(Verdict.REISSUE);
+    }
+
+    @Test
+    void aNoShowCouponIsNeitherFlownNorOpen() {
+        Coupon missed = coupon(0, "FRA", "JFK", "2025-06-20 10:25").withStatus(CouponStatus.NO_SHOW);
+        assertThat(missed.flownBy(TODAY)).isFalse();
+        assertThat(CouponStatus.NO_SHOW.isOpen()).isFalse();
+        assertThat(CouponStatus.of("NOSH")).isSameAs(CouponStatus.NO_SHOW);
+        assertThat(missedTheOutbound().hasNoShow()).isTrue();
+        assertThat(ticket().hasNoShow()).isFalse();
+        assertThat(missedTheOutbound().isFinished(TODAY)).isFalse();
+    }
 }

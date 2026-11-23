@@ -8,7 +8,12 @@ public enum CouponStatus {
     USED("USED"),
     EXCHANGED("EXCH"),
     REFUNDED("RFND"),
-    VOID("VOID");
+    VOID("VOID"),
+    /**
+     * The passenger did not turn up for it. Not flown and not open either: it can still be changed,
+     * and the change carries the no show fee on top.
+     */
+    NO_SHOW("NOSH");
 
     private final String value;
 

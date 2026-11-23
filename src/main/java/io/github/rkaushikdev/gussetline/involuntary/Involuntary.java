@@ -44,9 +44,15 @@ import java.util.Optional;
  * @param taxes what the reissue does to the taxes, when that was worked out
  * @param downgradeRefund what the passenger is owed for a lower cabin
  * @param notes why the reissue costs what it does, in the order the reasons were found
+ * @param compensation what Regulation 261 owes on top, when the journey was given to assess it on
  */
 public record Involuntary(
-        Money paid, Cause cause, Optional<TaxReissue> taxes, Money downgradeRefund, List<String> notes) {
+        Money paid,
+        Cause cause,
+        Optional<TaxReissue> taxes,
+        Money downgradeRefund,
+        List<String> notes,
+        Optional<Compensation> compensation) {
 
     /** How many days either side of the booked date still count as the same journey. */
     public static final int REACCOMMODATION_DAYS = 14;
@@ -62,6 +68,7 @@ public record Involuntary(
         Objects.requireNonNull(cause, "cause");
         Objects.requireNonNull(taxes, "taxes");
         Objects.requireNonNull(downgradeRefund, "downgradeRefund");
+        Objects.requireNonNull(compensation, "compensation");
         notes = List.copyOf(notes);
         if (downgradeRefund.isNegative()) {
             throw new ValidationError("a refund is not negative", Details.of("amount", downgradeRefund.toString()));
@@ -71,9 +78,9 @@ public record Involuntary(
         }
     }
 
-    /** A reissue with no taxes worked out, no downgrade owed in euro, and no notes. */
+    /** A reissue with no taxes worked out, no downgrade owed in euro, no notes and no compensation. */
     public Involuntary(Money paid, Cause cause) {
-        this(paid, cause, Optional.empty(), Money.zero("EUR"), List.of());
+        this(paid, cause, Optional.empty(), Money.zero("EUR"), List.of(), Optional.empty());
     }
 
     /**
@@ -112,24 +119,9 @@ public record Involuntary(
         return cause.value() + ": collect " + addCollect() + ", refund " + refund();
     }
 
-    /** An involuntary reissue with no taxes worked out and no change of cabin. */
+    /** An involuntary reissue with nothing known but its cause. */
     public static Involuntary assess(Money paid, Cause cause) {
-        return assess(paid, cause, Optional.empty(), Cabin.ECONOMY, Optional.empty(), Optional.empty());
-    }
-
-    /** An involuntary reissue with its taxes worked out and no change of cabin. */
-    public static Involuntary assess(Money paid, Cause cause, TaxReissue taxes) {
-        return assess(paid, cause, Optional.of(taxes), Cabin.ECONOMY, Optional.empty(), Optional.empty());
-    }
-
-    /** An involuntary reissue with no taxes worked out and no difference priced between the cabins. */
-    public static Involuntary assess(Money paid, Cause cause, Cabin was, Cabin now) {
-        return assess(paid, cause, Optional.empty(), was, Optional.of(now), Optional.empty());
-    }
-
-    /** An involuntary reissue with no taxes worked out, between two cabins that differ by an amount. */
-    public static Involuntary assess(Money paid, Cause cause, Cabin was, Cabin now, Money cabinDifference) {
-        return assess(paid, cause, Optional.empty(), was, Optional.of(now), Optional.of(cabinDifference));
+        return assess(paid, Disruption.of(cause));
     }
 
     /**
@@ -137,42 +129,37 @@ public record Involuntary(
      *
      * <p>A move to a lower cabin owes the difference between the two only when the cause owes a
      * downgrade refund; otherwise it is noted and owes nothing. A move up, or no move, owes nothing
-     * either way.
+     * either way. When the journey is known, the compensation the regulation owes is assessed on it
+     * ({@link Eu261#assess}) and noted when anything is owed.
      *
-     * @param taxes what the reissue does to the taxes, when that was worked out
-     * @param was the cabin booked
-     * @param now the cabin offered, when the reissue moves the passenger
-     * @param cabinDifference what the two cabins differ by. It is priced above this, because it is a
-     *     fare question and this module does not reprice fares
      * @throws ValidationError when a downgrade is owed and no difference was priced, naming {@code was}
      *     and {@code now}
      */
-    public static Involuntary assess(
-            Money paid,
-            Cause cause,
-            Optional<TaxReissue> taxes,
-            Cabin was,
-            Optional<Cabin> now,
-            Optional<Money> cabinDifference) {
+    public static Involuntary assess(Money paid, Disruption disruption) {
+        Cause cause = disruption.cause();
+        Cabin was = disruption.booked();
         List<String> notes = new ArrayList<>(List.of(
                 "the fare is the one the passenger bought, because the carrier did not fly it",
                 "no change fee, because nobody changed their mind"));
 
         Money owed = Money.zero(paid.currency());
+        Optional<Cabin> now = disruption.flown();
         if (now.isPresent() && now.get().rank() < was.rank()) {
             Cabin lower = now.get();
             if (!cause.owesADowngradeRefund()) {
                 notes.add("flown in " + lower.value() + " rather than " + was.value() + " without a downgrade owed");
-            } else if (cabinDifference.isEmpty()) {
+            } else if (disruption.cabinDifference().isEmpty()) {
                 throw new ValidationError(
                         "a downgrade needs the difference between the two cabins",
                         Details.of("was", was.value(), "now", lower.value()));
             } else {
-                owed = cabinDifference.get();
+                owed = disruption.cabinDifference().get();
                 notes.add("downgraded from " + was.value() + " to " + lower.value());
             }
         }
-        return new Involuntary(paid, cause, taxes, owed, notes);
+        Optional<Compensation> compensation = disruption.journey().map(journey -> Eu261.assess(journey, disruption));
+        compensation.filter(Compensation::owed).ifPresent(found -> notes.add("compensation of " + found));
+        return new Involuntary(paid, cause, disruption.taxes(), owed, notes, compensation);
     }
 
     /**

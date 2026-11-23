@@ -62,14 +62,14 @@ class InvoluntaryTest {
     @Test
     void aTaxThatWentUpIsStillCollected() {
         TaxReissue taxes = TaxReissue.assess(List.of(tax("32.50")), List.of(tax("40.00")));
-        Involuntary made = assess(PAID, Cause.CANCELLED, taxes);
+        Involuntary made = assess(PAID, Disruption.of(Cause.CANCELLED).withTaxes(taxes));
         assertThat(made.addCollect()).isEqualTo(eur("7.50"));
     }
 
     @Test
     void aTaxThatCameBackComesBack() {
         TaxReissue taxes = TaxReissue.assess(List.of(tax("40.00")), List.of(tax("32.50")));
-        Involuntary made = assess(PAID, Cause.CANCELLED, taxes);
+        Involuntary made = assess(PAID, Disruption.of(Cause.CANCELLED).withTaxes(taxes));
         assertThat(made.refund()).isEqualTo(eur("7.50"));
         assertThat(made.net().isNegative()).isTrue();
     }
@@ -83,7 +83,11 @@ class InvoluntaryTest {
 
     @Test
     void aDowngradeOwesTheDifferenceBetweenTheTwoCabins() {
-        Involuntary made = assess(PAID, Cause.DOWNGRADED, Cabin.BUSINESS, Cabin.ECONOMY, eur("1200.00"));
+        Involuntary made = assess(
+                PAID,
+                Disruption.of(Cause.DOWNGRADED)
+                        .withMove(Cabin.BUSINESS, Cabin.ECONOMY)
+                        .withCabinDifference(eur("1200.00")));
         assertThat(made.downgradeRefund()).isEqualTo(eur("1200.00"));
         assertThat(made.refund()).isEqualTo(eur("1200.00"));
         assertThat(made.notes().get(made.notes().size() - 1)).contains("downgraded from C to Y");
@@ -91,34 +95,39 @@ class InvoluntaryTest {
 
     @Test
     void deniedBoardingOwesADowngradeToo() {
-        Involuntary made = assess(PAID, Cause.DENIED_BOARDING, Cabin.BUSINESS, Cabin.ECONOMY, eur("900.00"));
+        Involuntary made = assess(
+                PAID,
+                Disruption.of(Cause.DENIED_BOARDING)
+                        .withMove(Cabin.BUSINESS, Cabin.ECONOMY)
+                        .withCabinDifference(eur("900.00")));
         assertThat(made.downgradeRefund()).isEqualTo(eur("900.00"));
     }
 
     @Test
     void aScheduleChangeThatHappensToSeatThemLowerOwesNothing() {
-        Involuntary made = assess(PAID, Cause.SCHEDULE_CHANGE, Cabin.BUSINESS, Cabin.ECONOMY);
+        Involuntary made = assess(PAID, Disruption.of(Cause.SCHEDULE_CHANGE).withMove(Cabin.BUSINESS, Cabin.ECONOMY));
         assertThat(made.downgradeRefund()).isEqualTo(Money.zero("EUR"));
         assertThat(made.notes().get(made.notes().size() - 1)).contains("without a downgrade owed");
     }
 
     @Test
     void aDowngradeWithNoDifferencePricedIsRefusedRatherThanGuessed() {
-        assertThatThrownBy(() -> assess(PAID, Cause.DOWNGRADED, Cabin.BUSINESS, Cabin.ECONOMY))
+        assertThatThrownBy(() -> assess(PAID, Disruption.of(Cause.DOWNGRADED).withMove(Cabin.BUSINESS, Cabin.ECONOMY)))
                 .isInstanceOf(ValidationError.class)
                 .hasMessageContaining("difference between the two cabins");
     }
 
     @Test
     void beingMovedUpACabinOwesNothingEitherWay() {
-        Involuntary made = assess(PAID, Cause.CANCELLED, Cabin.ECONOMY, Cabin.BUSINESS);
+        Involuntary made = assess(PAID, Disruption.of(Cause.CANCELLED).withMove(Cabin.ECONOMY, Cabin.BUSINESS));
         assertThat(made.downgradeRefund()).isEqualTo(Money.zero("EUR"));
         assertThat(made.net()).isEqualTo(Money.zero("EUR"));
     }
 
     @Test
     void aNegativeRefundIsRefused() {
-        assertThatThrownBy(() -> new Involuntary(PAID, Cause.CANCELLED, Optional.empty(), eur("-1.00"), List.of()))
+        assertThatThrownBy(() -> new Involuntary(
+                        PAID, Cause.CANCELLED, Optional.empty(), eur("-1.00"), List.of(), Optional.empty()))
                 .isInstanceOf(ValidationError.class)
                 .hasMessageContaining("not negative");
     }
@@ -249,11 +258,10 @@ class InvoluntaryTest {
                 residualFor(Cause.CANCELLED));
         Involuntary made = assess(
                 PAID,
-                Cause.DOWNGRADED,
-                Optional.of(taxes),
-                Cabin.BUSINESS,
-                Optional.of(Cabin.ECONOMY),
-                Optional.of(eur("1200.00")));
+                Disruption.of(Cause.DOWNGRADED)
+                        .withTaxes(taxes)
+                        .withMove(Cabin.BUSINESS, Cabin.ECONOMY)
+                        .withCabinDifference(eur("1200.00")));
         assertThat(made.newFare()).isEqualTo(PAID);
         assertThat(made.penalty()).isEqualTo(Money.zero("EUR"));
         assertThat(made.addCollect()).isEqualTo(eur("7.50"));

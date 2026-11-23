@@ -107,12 +107,7 @@ public record Reliability(
          * @throws IllegalArgumentException when the word is no grade
          */
         public static Grade of(String value) {
-            for (Grade grade : values()) {
-                if (grade.value.equals(value)) {
-                    return grade;
-                }
-            }
-            throw new IllegalArgumentException("'" + value + "' is not a valid Grade");
+            return Text.named(values(), Grade::value, value, "Grade");
         }
     }
 

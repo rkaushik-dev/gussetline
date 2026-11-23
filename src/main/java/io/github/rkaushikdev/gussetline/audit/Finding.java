@@ -1,5 +1,7 @@
 package io.github.rkaushikdev.gussetline.audit;
 
+import io.github.rkaushikdev.gussetline.util.Text;
+
 /** What kind of disagreement an audit found, which decides who gets the letter. */
 public enum Finding {
     AGREES("agrees"),
@@ -31,11 +33,6 @@ public enum Finding {
      * @throws IllegalArgumentException when the name is no finding
      */
     public static Finding of(String value) {
-        for (Finding finding : values()) {
-            if (finding.value.equals(value)) {
-                return finding;
-            }
-        }
-        throw new IllegalArgumentException("'" + value + "' is not a valid Finding");
+        return Text.named(values(), Finding::value, value, "Finding");
     }
 }

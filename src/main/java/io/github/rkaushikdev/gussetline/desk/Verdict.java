@@ -1,5 +1,6 @@
 package io.github.rkaushikdev.gussetline.desk;
 
+import io.github.rkaushikdev.gussetline.util.Text;
 import java.util.Optional;
 
 /** What the desk should do about a held drop, in one word. */
@@ -50,11 +51,6 @@ public enum Verdict {
      * @throws IllegalArgumentException when the word is no verdict
      */
     public static Verdict of(String value) {
-        for (Verdict verdict : values()) {
-            if (verdict.value.equals(value)) {
-                return verdict;
-            }
-        }
-        throw new IllegalArgumentException("'" + value + "' is not a valid Verdict");
+        return Text.named(values(), Verdict::value, value, "Verdict");
     }
 }

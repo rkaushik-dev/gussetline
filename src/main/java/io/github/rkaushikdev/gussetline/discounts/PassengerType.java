@@ -1,5 +1,7 @@
 package io.github.rkaushikdev.gussetline.discounts;
 
+import io.github.rkaushikdev.gussetline.util.Text;
+
 /** The passenger codes the tariff prices and the desk sells. */
 public enum PassengerType {
     ADULT("ADT"),
@@ -37,11 +39,6 @@ public enum PassengerType {
      * @throws IllegalArgumentException when the code names no passenger type
      */
     public static PassengerType of(String value) {
-        for (PassengerType type : values()) {
-            if (type.value.equals(value)) {
-                return type;
-            }
-        }
-        throw new IllegalArgumentException("'" + value + "' is not a valid PassengerType");
+        return Text.named(values(), PassengerType::value, value, "PassengerType");
     }
 }

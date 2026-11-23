@@ -1,5 +1,7 @@
 package io.github.rkaushikdev.gussetline.collect;
 
+import io.github.rkaushikdev.gussetline.util.Text;
+
 /**
  * What a call did, in the terms the run report is written in.
  *
@@ -42,11 +44,6 @@ public enum Outcome {
      * @throws IllegalArgumentException when the word is no outcome
      */
     public static Outcome of(String value) {
-        for (Outcome outcome : values()) {
-            if (outcome.value.equals(value)) {
-                return outcome;
-            }
-        }
-        throw new IllegalArgumentException("'" + value + "' is not a valid Outcome");
+        return Text.named(values(), Outcome::value, value, "Outcome");
     }
 }

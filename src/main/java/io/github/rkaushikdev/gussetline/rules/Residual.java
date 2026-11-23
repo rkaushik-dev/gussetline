@@ -1,5 +1,7 @@
 package io.github.rkaushikdev.gussetline.rules;
 
+import io.github.rkaushikdev.gussetline.util.Text;
+
 /**
  * What happens to the difference when a reissue lands on a lower fare than the one paid.
  *
@@ -29,11 +31,6 @@ public enum Residual {
      * @throws IllegalArgumentException when the name is no residual handling
      */
     public static Residual of(String value) {
-        for (Residual residual : values()) {
-            if (residual.value.equals(value)) {
-                return residual;
-            }
-        }
-        throw new IllegalArgumentException("'" + value + "' is not a valid Residual");
+        return Text.named(values(), Residual::value, value, "Residual");
     }
 }

@@ -1,5 +1,7 @@
 package io.github.rkaushikdev.gussetline.involuntary;
 
+import io.github.rkaushikdev.gussetline.util.Text;
+
 /** Why the carrier is reaccommodating. Never a default and never blank. */
 public enum Cause {
     CANCELLED("cancelled"),
@@ -35,11 +37,6 @@ public enum Cause {
      * @throws IllegalArgumentException when the name is no cause
      */
     public static Cause of(String value) {
-        for (Cause cause : values()) {
-            if (cause.value.equals(value)) {
-                return cause;
-            }
-        }
-        throw new IllegalArgumentException("'" + value + "' is not a valid Cause");
+        return Text.named(values(), Cause::value, value, "Cause");
     }
 }

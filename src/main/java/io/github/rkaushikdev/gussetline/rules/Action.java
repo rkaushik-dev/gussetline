@@ -1,5 +1,7 @@
 package io.github.rkaushikdev.gussetline.rules;
 
+import io.github.rkaushikdev.gussetline.util.Text;
+
 /** What a passenger does to a ticket that a category 16 fee is filed for. */
 public enum Action {
     CHANGE("change"),
@@ -23,11 +25,6 @@ public enum Action {
      * @throws IllegalArgumentException when the name is no action
      */
     public static Action of(String value) {
-        for (Action action : values()) {
-            if (action.value.equals(value)) {
-                return action;
-            }
-        }
-        throw new IllegalArgumentException("'" + value + "' is not a valid Action");
+        return Text.named(values(), Action::value, value, "Action");
     }
 }

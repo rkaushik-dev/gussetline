@@ -1,5 +1,7 @@
 package io.github.rkaushikdev.gussetline.trace;
 
+import io.github.rkaushikdev.gussetline.util.Text;
+
 /** The parts of a price that can each pass or refuse on their own. */
 public enum Stage {
     /**
@@ -36,11 +38,6 @@ public enum Stage {
      * @throws IllegalArgumentException when the name is no stage
      */
     public static Stage of(String value) {
-        for (Stage stage : values()) {
-            if (stage.value.equals(value)) {
-                return stage;
-            }
-        }
-        throw new IllegalArgumentException("'" + value + "' is not a valid Stage");
+        return Text.named(values(), Stage::value, value, "Stage");
     }
 }

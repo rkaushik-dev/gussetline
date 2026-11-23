@@ -1,5 +1,7 @@
 package io.github.rkaushikdev.gussetline.geography;
 
+import io.github.rkaushikdev.gussetline.util.Text;
+
 /** The sub areas the rules actually name, each inside exactly one {@link Area}. */
 public enum SubArea {
     NORTH_AMERICA("NA", Area.ONE),
@@ -38,11 +40,6 @@ public enum SubArea {
      * @throws IllegalArgumentException when the letters name no sub area
      */
     public static SubArea of(String value) {
-        for (SubArea sub : values()) {
-            if (sub.value.equals(value)) {
-                return sub;
-            }
-        }
-        throw new IllegalArgumentException("'" + value + "' is not a valid SubArea");
+        return Text.named(values(), SubArea::value, value, "SubArea");
     }
 }

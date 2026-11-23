@@ -1,5 +1,7 @@
 package io.github.rkaushikdev.gussetline.desk;
 
+import io.github.rkaushikdev.gussetline.util.Text;
+
 /** What has happened to one coupon, under the code a ticket record shows for it. */
 public enum CouponStatus {
     OPEN("OK"),
@@ -30,11 +32,6 @@ public enum CouponStatus {
      * @throws IllegalArgumentException when the code is no status
      */
     public static CouponStatus of(String value) {
-        for (CouponStatus status : values()) {
-            if (status.value.equals(value)) {
-                return status;
-            }
-        }
-        throw new IllegalArgumentException("'" + value + "' is not a valid CouponStatus");
+        return Text.named(values(), CouponStatus::value, value, "CouponStatus");
     }
 }

@@ -3,6 +3,7 @@ package io.github.rkaushikdev.gussetline.collect;
 import io.github.rkaushikdev.gussetline.Details;
 import io.github.rkaushikdev.gussetline.SupplierUnavailable;
 import io.github.rkaushikdev.gussetline.ValidationError;
+import io.github.rkaushikdev.gussetline.util.Text;
 import java.util.function.DoubleSupplier;
 
 /**
@@ -51,12 +52,7 @@ public final class Breaker {
          * @throws IllegalArgumentException when the name is no state
          */
         public static State of(String value) {
-            for (State state : values()) {
-                if (state.value.equals(value)) {
-                    return state;
-                }
-            }
-            throw new IllegalArgumentException("'" + value + "' is not a valid State");
+            return Text.named(values(), State::value, value, "State");
         }
     }
 

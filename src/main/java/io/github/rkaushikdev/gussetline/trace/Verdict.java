@@ -1,5 +1,7 @@
 package io.github.rkaushikdev.gussetline.trace;
 
+import io.github.rkaushikdev.gussetline.util.Text;
+
 /** What one recorded decision came to. */
 public enum Verdict {
     PASS("pass"),
@@ -23,11 +25,6 @@ public enum Verdict {
      * @throws IllegalArgumentException when the name is no verdict
      */
     public static Verdict of(String value) {
-        for (Verdict verdict : values()) {
-            if (verdict.value.equals(value)) {
-                return verdict;
-            }
-        }
-        throw new IllegalArgumentException("'" + value + "' is not a valid Verdict");
+        return Text.named(values(), Verdict::value, value, "Verdict");
     }
 }

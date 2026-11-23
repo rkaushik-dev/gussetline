@@ -1,5 +1,7 @@
 package io.github.rkaushikdev.gussetline.api;
 
+import io.github.rkaushikdev.gussetline.util.Text;
+
 /**
  * What a key may do. Ordered, and the order is meaningful.
  *
@@ -42,11 +44,6 @@ public enum Role {
      * @throws IllegalArgumentException when the name is no role
      */
     public static Role of(String value) {
-        for (Role role : values()) {
-            if (role.value.equals(value)) {
-                return role;
-            }
-        }
-        throw new IllegalArgumentException("'" + value + "' is not a valid Role");
+        return Text.named(values(), Role::value, value, "Role");
     }
 }

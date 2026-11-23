@@ -1,5 +1,7 @@
 package io.github.rkaushikdev.gussetline.itinerary;
 
+import io.github.rkaushikdev.gussetline.util.Text;
+
 /** The four shapes of journey the tariff prices, each on its own minimum. */
 public enum JourneyType {
     ONE_WAY("OW"),
@@ -24,11 +26,6 @@ public enum JourneyType {
      * @throws IllegalArgumentException when the letters name no journey type
      */
     public static JourneyType of(String value) {
-        for (JourneyType type : values()) {
-            if (type.value.equals(value)) {
-                return type;
-            }
-        }
-        throw new IllegalArgumentException("'" + value + "' is not a valid JourneyType");
+        return Text.named(values(), JourneyType::value, value, "JourneyType");
     }
 }

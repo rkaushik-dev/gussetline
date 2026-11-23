@@ -96,12 +96,7 @@ public record Coverage(LocalDate asOf, List<Watched> series) {
          * @throws IllegalArgumentException when the word is no grade
          */
         public static Cover of(String value) {
-            for (Cover cover : values()) {
-                if (cover.value.equals(value)) {
-                    return cover;
-                }
-            }
-            throw new IllegalArgumentException("'" + value + "' is not a valid Cover");
+            return Text.named(values(), Cover::value, value, "Cover");
         }
     }
 

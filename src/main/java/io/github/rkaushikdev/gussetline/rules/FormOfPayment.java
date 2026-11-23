@@ -1,5 +1,7 @@
 package io.github.rkaushikdev.gussetline.rules;
 
+import io.github.rkaushikdev.gussetline.util.Text;
+
 /** How a ticket is paid for, which a category 15 filing may restrict. */
 public enum FormOfPayment {
     ANY("any"),
@@ -24,11 +26,6 @@ public enum FormOfPayment {
      * @throws IllegalArgumentException when the name is no form of payment
      */
     public static FormOfPayment of(String value) {
-        for (FormOfPayment payment : values()) {
-            if (payment.value.equals(value)) {
-                return payment;
-            }
-        }
-        throw new IllegalArgumentException("'" + value + "' is not a valid FormOfPayment");
+        return Text.named(values(), FormOfPayment::value, value, "FormOfPayment");
     }
 }

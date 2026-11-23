@@ -1,5 +1,7 @@
 package io.github.rkaushikdev.gussetline.rules;
 
+import io.github.rkaushikdev.gussetline.util.Text;
+
 /**
  * The three answers a provision can give.
  *
@@ -29,11 +31,6 @@ public enum Answer {
      * @throws IllegalArgumentException when the name is no answer
      */
     public static Answer of(String value) {
-        for (Answer answer : values()) {
-            if (answer.value.equals(value)) {
-                return answer;
-            }
-        }
-        throw new IllegalArgumentException("'" + value + "' is not a valid Answer");
+        return Text.named(values(), Answer::value, value, "Answer");
     }
 }

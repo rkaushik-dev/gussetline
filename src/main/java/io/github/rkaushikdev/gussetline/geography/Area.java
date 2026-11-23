@@ -1,5 +1,7 @@
 package io.github.rkaushikdev.gussetline.geography;
 
+import io.github.rkaushikdev.gussetline.util.Text;
+
 /** The three IATA traffic conference areas. */
 public enum Area {
     ONE("1"),
@@ -23,11 +25,6 @@ public enum Area {
      * @throws IllegalArgumentException when the digit names no area
      */
     public static Area of(String value) {
-        for (Area area : values()) {
-            if (area.value.equals(value)) {
-                return area;
-            }
-        }
-        throw new IllegalArgumentException("'" + value + "' is not a valid Area");
+        return Text.named(values(), Area::value, value, "Area");
     }
 }

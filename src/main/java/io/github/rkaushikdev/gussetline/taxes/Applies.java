@@ -1,5 +1,7 @@
 package io.github.rkaushikdev.gussetline.taxes;
 
+import io.github.rkaushikdev.gussetline.util.Text;
+
 /** How many times a filed tax is charged on one journey. */
 public enum Applies {
     /** Once, at the point the journey starts. */
@@ -30,11 +32,6 @@ public enum Applies {
      * @throws IllegalArgumentException when the name is no scope
      */
     public static Applies of(String value) {
-        for (Applies applies : values()) {
-            if (applies.value.equals(value)) {
-                return applies;
-            }
-        }
-        throw new IllegalArgumentException("'" + value + "' is not a valid Applies");
+        return Text.named(values(), Applies::value, value, "Applies");
     }
 }

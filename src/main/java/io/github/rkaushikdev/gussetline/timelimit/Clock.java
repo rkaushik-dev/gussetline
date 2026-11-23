@@ -1,5 +1,7 @@
 package io.github.rkaushikdev.gussetline.timelimit;
 
+import io.github.rkaushikdev.gussetline.util.Text;
+
 /** Which of the clocks set the deadline on a held booking. */
 public enum Clock {
     HOLD("the hold on the booking"),
@@ -30,11 +32,6 @@ public enum Clock {
      * @throws IllegalArgumentException when the reason names no clock
      */
     public static Clock of(String value) {
-        for (Clock clock : values()) {
-            if (clock.value.equals(value)) {
-                return clock;
-            }
-        }
-        throw new IllegalArgumentException("'" + value + "' is not a valid Clock");
+        return Text.named(values(), Clock::value, value, "Clock");
     }
 }

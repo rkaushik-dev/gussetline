@@ -1,6 +1,7 @@
 package io.github.rkaushikdev.gussetline.load;
 
 import io.github.rkaushikdev.gussetline.tariff.Fare;
+import io.github.rkaushikdev.gussetline.util.Text;
 import java.util.Objects;
 
 /**
@@ -54,12 +55,7 @@ public record Filing(Action action, Fare fare, int lineNumber) {
          * @throws IllegalArgumentException when the word names no action
          */
         public static Action of(String value) {
-            for (Action action : values()) {
-                if (action.value.equals(value)) {
-                    return action;
-                }
-            }
-            throw new IllegalArgumentException("'" + value + "' is not a valid Action");
+            return Text.named(values(), Action::value, value, "Action");
         }
     }
 }

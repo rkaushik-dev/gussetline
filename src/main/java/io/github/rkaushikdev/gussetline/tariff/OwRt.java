@@ -1,5 +1,7 @@
 package io.github.rkaushikdev.gussetline.tariff;
 
+import io.github.rkaushikdev.gussetline.util.Text;
+
 /**
  * What the filed amount means: the one way round trip indicator.
  *
@@ -31,11 +33,6 @@ public enum OwRt {
      * @throws IllegalArgumentException when the digit names no indicator
      */
     public static OwRt of(String value) {
-        for (OwRt owrt : values()) {
-            if (owrt.value.equals(value)) {
-                return owrt;
-            }
-        }
-        throw new IllegalArgumentException("'" + value + "' is not a valid OwRt");
+        return Text.named(values(), OwRt::value, value, "OwRt");
     }
 }

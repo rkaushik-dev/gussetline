@@ -1,5 +1,7 @@
 package io.github.rkaushikdev.gussetline.reissue;
 
+import io.github.rkaushikdev.gussetline.util.Text;
+
 /**
  * What happens to one tax line when a ticket is reissued.
  *
@@ -39,11 +41,6 @@ public enum Treatment {
      * @throws IllegalArgumentException when the name is no treatment
      */
     public static Treatment of(String value) {
-        for (Treatment treatment : values()) {
-            if (treatment.value.equals(value)) {
-                return treatment;
-            }
-        }
-        throw new IllegalArgumentException("'" + value + "' is not a valid Treatment");
+        return Text.named(values(), Treatment::value, value, "Treatment");
     }
 }

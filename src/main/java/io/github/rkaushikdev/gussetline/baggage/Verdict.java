@@ -1,5 +1,7 @@
 package io.github.rkaushikdev.gussetline.baggage;
 
+import io.github.rkaushikdev.gussetline.util.Text;
+
 /** What a change of fare does to what the passenger may carry. */
 public enum Verdict {
     SAME("same"),
@@ -27,12 +29,7 @@ public enum Verdict {
      * @throws IllegalArgumentException when the name is no verdict
      */
     public static Verdict of(String value) {
-        for (Verdict verdict : values()) {
-            if (verdict.value.equals(value)) {
-                return verdict;
-            }
-        }
-        throw new IllegalArgumentException("'" + value + "' is not a valid Verdict");
+        return Text.named(values(), Verdict::value, value, "Verdict");
     }
 
     /** Whether the desk has to say something about it before quoting. */

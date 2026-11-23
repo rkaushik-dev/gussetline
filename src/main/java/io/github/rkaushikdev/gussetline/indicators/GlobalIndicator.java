@@ -1,5 +1,7 @@
 package io.github.rkaushikdev.gussetline.indicators;
 
+import io.github.rkaushikdev.gussetline.util.Text;
+
 /**
  * The global indicators the desk sees, which are part of the fare key and not a description. There
  * are more, and the desk does not sell them.
@@ -43,11 +45,6 @@ public enum GlobalIndicator {
      * @throws IllegalArgumentException when the letters name no indicator
      */
     public static GlobalIndicator of(String value) {
-        for (GlobalIndicator indicator : values()) {
-            if (indicator.value.equals(value)) {
-                return indicator;
-            }
-        }
-        throw new IllegalArgumentException("'" + value + "' is not a valid GlobalIndicator");
+        return Text.named(values(), GlobalIndicator::value, value, "GlobalIndicator");
     }
 }

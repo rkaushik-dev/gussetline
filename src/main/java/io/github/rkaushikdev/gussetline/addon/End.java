@@ -1,5 +1,7 @@
 package io.github.rkaushikdev.gussetline.addon;
 
+import io.github.rkaushikdev.gussetline.util.Text;
+
 /** Which end of the gateway fare an arbitrary attaches to. */
 public enum End {
     /** The end the journey starts from: the arbitrary reaches the gateway from the interior point. */
@@ -24,11 +26,6 @@ public enum End {
      * @throws IllegalArgumentException when the name is no end
      */
     public static End of(String value) {
-        for (End end : values()) {
-            if (end.value.equals(value)) {
-                return end;
-            }
-        }
-        throw new IllegalArgumentException("'" + value + "' is not a valid End");
+        return Text.named(values(), End::value, value, "End");
     }
 }

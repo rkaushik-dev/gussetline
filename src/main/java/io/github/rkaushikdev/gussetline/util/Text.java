@@ -9,6 +9,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 /**
@@ -30,6 +31,27 @@ public final class Text {
             Arrays.compare(left.codePoints().toArray(), right.codePoints().toArray());
 
     private Text() {}
+
+    /**
+     * The one of a closed set of codes filed, stored or sent under a name: the first whose name is
+     * exactly the text given. Every enumerated code on the desk reads its stored name back this way,
+     * so a filing that carries a code nobody knows is refused in the same words wherever it turns
+     * up.
+     *
+     * @param codes every code there is, in declaration order
+     * @param name the name each code is filed under
+     * @param text the name read
+     * @param kind what the codes are called, for the refusal
+     * @throws IllegalArgumentException naming the text and the kind when no code is filed under it
+     */
+    public static <T> T named(T[] codes, Function<T, String> name, String text, String kind) {
+        for (T code : codes) {
+            if (name.apply(code).equals(text)) {
+                return code;
+            }
+        }
+        throw new IllegalArgumentException("'" + text + "' is not a valid " + kind);
+    }
 
     /** Whether one code point is white space, no-break spaces included. */
     public static boolean isSpace(int codePoint) {

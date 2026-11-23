@@ -1,5 +1,7 @@
 package io.github.rkaushikdev.gussetline.surcharges;
 
+import io.github.rkaushikdev.gussetline.util.Text;
+
 /** How many times a filed surcharge is charged on one fare component. */
 public enum Scope {
     /** Once for the whole component, however many sectors it has. */
@@ -24,11 +26,6 @@ public enum Scope {
      * @throws IllegalArgumentException when the name is no scope
      */
     public static Scope of(String value) {
-        for (Scope scope : values()) {
-            if (scope.value.equals(value)) {
-                return scope;
-            }
-        }
-        throw new IllegalArgumentException("'" + value + "' is not a valid Scope");
+        return Text.named(values(), Scope::value, value, "Scope");
     }
 }

@@ -1,5 +1,7 @@
 package io.github.rkaushikdev.gussetline.tariff;
 
+import io.github.rkaushikdev.gussetline.util.Text;
+
 /** Who a fare is filed for. Private and published fares sit in the same tariff store. */
 public enum FareType {
     PUBLISHED("published"),
@@ -26,11 +28,6 @@ public enum FareType {
      * @throws IllegalArgumentException when the name is no fare type
      */
     public static FareType of(String value) {
-        for (FareType type : values()) {
-            if (type.value.equals(value)) {
-                return type;
-            }
-        }
-        throw new IllegalArgumentException("'" + value + "' is not a valid FareType");
+        return Text.named(values(), FareType::value, value, "FareType");
     }
 }

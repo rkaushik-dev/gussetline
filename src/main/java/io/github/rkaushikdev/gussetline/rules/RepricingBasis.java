@@ -1,5 +1,7 @@
 package io.github.rkaushikdev.gussetline.rules;
 
+import io.github.rkaushikdev.gussetline.util.Text;
+
 /**
  * Which day's tariff a reissue is priced from.
  *
@@ -28,11 +30,6 @@ public enum RepricingBasis {
      * @throws IllegalArgumentException when the name is no basis
      */
     public static RepricingBasis of(String value) {
-        for (RepricingBasis basis : values()) {
-            if (basis.value.equals(value)) {
-                return basis;
-            }
-        }
-        throw new IllegalArgumentException("'" + value + "' is not a valid RepricingBasis");
+        return Text.named(values(), RepricingBasis::value, value, "RepricingBasis");
     }
 }

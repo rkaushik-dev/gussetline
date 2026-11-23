@@ -1,5 +1,7 @@
 package io.github.rkaushikdev.gussetline.desk;
 
+import io.github.rkaushikdev.gussetline.util.Text;
+
 /**
  * The states a recommendation moves through once the desk has told a customer about it.
  *
@@ -50,11 +52,6 @@ public enum State {
      * @throws IllegalArgumentException when the word is no state
      */
     public static State of(String value) {
-        for (State state : values()) {
-            if (state.value.equals(value)) {
-                return state;
-            }
-        }
-        throw new IllegalArgumentException("'" + value + "' is not a valid State");
+        return Text.named(values(), State::value, value, "State");
     }
 }

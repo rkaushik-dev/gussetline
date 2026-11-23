@@ -1,5 +1,7 @@
 package io.github.rkaushikdev.gussetline.flights;
 
+import io.github.rkaushikdev.gussetline.util.Text;
+
 /** The four cabins the tariff prices. Anything else is marketing. */
 public enum Cabin {
     FIRST("F", 4),
@@ -36,11 +38,6 @@ public enum Cabin {
      * @throws IllegalArgumentException when the letter names no cabin
      */
     public static Cabin of(String value) {
-        for (Cabin cabin : values()) {
-            if (cabin.value.equals(value)) {
-                return cabin;
-            }
-        }
-        throw new IllegalArgumentException("'" + value + "' is not a valid Cabin");
+        return Text.named(values(), Cabin::value, value, "Cabin");
     }
 }

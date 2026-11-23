@@ -1,5 +1,7 @@
 package io.github.rkaushikdev.gussetline.collect;
 
+import io.github.rkaushikdev.gussetline.util.Text;
+
 /** What a supplier can be asked for. */
 public enum Capability {
     SHOP("shop"),
@@ -25,11 +27,6 @@ public enum Capability {
      * @throws IllegalArgumentException when the name is no capability
      */
     public static Capability of(String value) {
-        for (Capability capability : values()) {
-            if (capability.value.equals(value)) {
-                return capability;
-            }
-        }
-        throw new IllegalArgumentException("'" + value + "' is not a valid Capability");
+        return Text.named(values(), Capability::value, value, "Capability");
     }
 }

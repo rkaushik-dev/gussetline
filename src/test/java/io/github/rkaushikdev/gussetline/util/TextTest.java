@@ -1,15 +1,22 @@
 package io.github.rkaushikdev.gussetline.util;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.catchThrowableOfType;
 
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 class TextTest {
 
@@ -155,5 +162,90 @@ class TextTest {
         assertThat(Text.plain(List.of("DE"))).isEqualTo("['DE']");
         assertThat(Text.plain(LocalDateTime.of(2025, 3, 4, 10, 25))).isEqualTo("2025-03-04 10:25:00");
         assertThat(Text.plain(8120)).isEqualTo("8120");
+    }
+
+    private enum Fruit {
+        APPLE,
+        PEAR,
+        PLUM
+    }
+
+    @Test
+    void aCodeIsFoundByTheExactNameItIsFiledUnder() {
+        assertThat(Text.named(Fruit.values(), fruit -> fruit.name().toLowerCase(Locale.ROOT), "pear", "Fruit"))
+                .isSameAs(Fruit.PEAR);
+    }
+
+    @Test
+    void aNameNoCodeIsFiledUnderIsRefusedNamingTheKind() {
+        assertThatThrownBy(() -> Text.named(Fruit.values(), Fruit::name, "pear", "Fruit"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("'pear' is not a valid Fruit");
+        assertThatThrownBy(() -> Text.named(Fruit.values(), Fruit::name, " PEAR", "Fruit"))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void ofTwoCodesUnderOneNameTheFirstDeclaredWins() {
+        assertThat(Text.named(Fruit.values(), fruit -> fruit == Fruit.PLUM ? "stone" : fruit.name(), "stone", "Fruit"))
+                .isSameAs(Fruit.PLUM);
+        assertThat(Text.named(Fruit.values(), fruit -> "same", "same", "Fruit")).isSameAs(Fruit.APPLE);
+    }
+
+    @ParameterizedTest
+    @ValueSource(
+            strings = {
+                "io.github.rkaushikdev.gussetline.addon.End",
+                "io.github.rkaushikdev.gussetline.api.Role",
+                "io.github.rkaushikdev.gussetline.audit.Finding",
+                "io.github.rkaushikdev.gussetline.baggage.Verdict",
+                "io.github.rkaushikdev.gussetline.carriers.Alliance",
+                "io.github.rkaushikdev.gussetline.collect.Breaker$State",
+                "io.github.rkaushikdev.gussetline.collect.Capability",
+                "io.github.rkaushikdev.gussetline.collect.Outcome",
+                "io.github.rkaushikdev.gussetline.desk.CouponStatus",
+                "io.github.rkaushikdev.gussetline.desk.Retired",
+                "io.github.rkaushikdev.gussetline.desk.State",
+                "io.github.rkaushikdev.gussetline.desk.Verdict",
+                "io.github.rkaushikdev.gussetline.discounts.PassengerType",
+                "io.github.rkaushikdev.gussetline.flights.Cabin",
+                "io.github.rkaushikdev.gussetline.geography.Area",
+                "io.github.rkaushikdev.gussetline.geography.SubArea",
+                "io.github.rkaushikdev.gussetline.indicators.GlobalIndicator",
+                "io.github.rkaushikdev.gussetline.involuntary.Cause",
+                "io.github.rkaushikdev.gussetline.itinerary.JourneyType",
+                "io.github.rkaushikdev.gussetline.load.Filing$Action",
+                "io.github.rkaushikdev.gussetline.reissue.Treatment",
+                "io.github.rkaushikdev.gussetline.reports.Coverage$Cover",
+                "io.github.rkaushikdev.gussetline.reports.Reliability$Grade",
+                "io.github.rkaushikdev.gussetline.rules.Action",
+                "io.github.rkaushikdev.gussetline.rules.Answer",
+                "io.github.rkaushikdev.gussetline.rules.Applies",
+                "io.github.rkaushikdev.gussetline.rules.FormOfPayment",
+                "io.github.rkaushikdev.gussetline.rules.RepricingBasis",
+                "io.github.rkaushikdev.gussetline.rules.Residual",
+                "io.github.rkaushikdev.gussetline.surcharges.Scope",
+                "io.github.rkaushikdev.gussetline.tariff.FareType",
+                "io.github.rkaushikdev.gussetline.tariff.OwRt",
+                "io.github.rkaushikdev.gussetline.taxes.Applies",
+                "io.github.rkaushikdev.gussetline.taxes.Basis",
+                "io.github.rkaushikdev.gussetline.timelimit.Clock",
+                "io.github.rkaushikdev.gussetline.trace.Stage",
+                "io.github.rkaushikdev.gussetline.trace.Verdict"
+            })
+    void everyEnumeratedCodeReadsBackUnderItsOwnName(String type) throws ReflectiveOperationException {
+        Class<?> codes = Class.forName(type);
+        Method of = codes.getMethod("of", String.class);
+        Method value = codes.getMethod("value");
+        for (Object code : codes.getEnumConstants()) {
+            assertThat(of.invoke(null, value.invoke(code)))
+                    .as(type + " " + code)
+                    .isSameAs(code);
+        }
+        InvocationTargetException refused =
+                catchThrowableOfType(InvocationTargetException.class, () -> of.invoke(null, "no such code"));
+        assertThat(refused.getCause())
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("'no such code' is not a valid " + codes.getSimpleName());
     }
 }

@@ -1,5 +1,7 @@
 package io.github.rkaushikdev.gussetline.desk;
 
+import io.github.rkaushikdev.gussetline.util.Text;
+
 /** Why a watch was closed. A watch is never closed without one of these. */
 public enum Retired {
     FLOWN("the departure has gone"),
@@ -26,11 +28,6 @@ public enum Retired {
      * @throws IllegalArgumentException when the sentence is no reason
      */
     public static Retired of(String value) {
-        for (Retired reason : values()) {
-            if (reason.value.equals(value)) {
-                return reason;
-            }
-        }
-        throw new IllegalArgumentException("'" + value + "' is not a valid Retired");
+        return Text.named(values(), Retired::value, value, "Retired");
     }
 }

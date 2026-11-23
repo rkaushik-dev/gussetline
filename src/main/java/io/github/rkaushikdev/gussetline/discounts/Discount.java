@@ -93,14 +93,13 @@ public record Discount(
         if (minAge.isEmpty() && maxAge.isEmpty()) {
             return true;
         }
-        Optional<Integer> age = passenger.ageOn(departure);
-        if (age.isEmpty()) {
-            return false;
-        }
-        if (minAge.isPresent() && age.get() < minAge.get()) {
-            return false;
-        }
-        return !(maxAge.isPresent() && age.get() > maxAge.get());
+        return passenger.ageOn(departure).filter(this::inRange).isPresent();
+    }
+
+    /** Whether an age falls inside the filed range, both ends included. */
+    private boolean inRange(int age) {
+        return minAge.map(youngest -> age >= youngest).orElse(true)
+                && maxAge.map(oldest -> age <= oldest).orElse(true);
     }
 
     /** Take the discount off an amount in neutral units, to the cent with halves away from zero. */

@@ -79,22 +79,51 @@ public final class Discounts {
     }
 
     /**
+     * What a whole booking pays for one component in neutral units: each passenger as the party
+     * rules ticket them on the component's departure ({@link Party#ticketedOn}), discounted as filed,
+     * and a lap infant included like everybody else, at the infant discount.
+     *
+     * @throws ValidationError when the carrier designator is malformed
+     */
+    public static BigDecimal partyNuc(
+            BigDecimal nuc, String carrier, Party party, LocalDate departure, DiscountStore store) {
+        BigDecimal total = BigDecimal.ZERO;
+        for (Passenger passenger : party.ticketedOn(departure)) {
+            total = total.add(discountedNuc(nuc, carrier, passenger, departure, store));
+        }
+        return total;
+    }
+
+    /**
      * The discounts the desk sees on nearly every carrier it sells: an infant on a lap, an infant in
      * a seat, a child and a youth, each with its age range.
      */
     public static DiscountStore defaultDiscountStore() {
         DiscountStore store = new DiscountStore();
         for (String carrier : SHIPPED_CARRIERS) {
-            store.add(new Discount(carrier, PassengerType.INFANT, BigDecimal.valueOf(90), "IN90").withMaxAge(1));
-            store.add(new Discount(carrier, PassengerType.INFANT_WITH_SEAT, BigDecimal.valueOf(25), "IN25")
-                    .withMaxAge(1));
-            store.add(new Discount(carrier, PassengerType.CHILD, BigDecimal.valueOf(25), "CH25")
-                    .withMinAge(2)
-                    .withMaxAge(11));
-            store.add(new Discount(carrier, PassengerType.YOUTH, BigDecimal.valueOf(10), "YT10")
-                    .withMinAge(12)
-                    .withMaxAge(24));
+            for (Shipped row : SHIPPED) {
+                store.add(row.filedBy(carrier));
+            }
         }
         return store;
+    }
+
+    /**
+     * The discounts every shipped carrier files: an infant on a lap and one in a seat until their
+     * second birthday, a child from two to eleven and a youth from twelve to twenty four.
+     */
+    private static final List<Shipped> SHIPPED = List.of(
+            new Shipped(PassengerType.INFANT, 90, "IN90", 0, Party.LAP_AGE_LIMIT - 1),
+            new Shipped(PassengerType.INFANT_WITH_SEAT, 25, "IN25", 0, Party.LAP_AGE_LIMIT - 1),
+            new Shipped(PassengerType.CHILD, 25, "CH25", Party.LAP_AGE_LIMIT, 11),
+            new Shipped(PassengerType.YOUTH, 10, "YT10", 12, 24));
+
+    /** One shipped discount, before a carrier files it. An age bound of nought is no lower bound. */
+    private record Shipped(PassengerType kind, int percent, String designator, int minAge, int maxAge) {
+
+        Discount filedBy(String carrier) {
+            Discount filed = new Discount(carrier, kind, BigDecimal.valueOf(percent), designator).withMaxAge(maxAge);
+            return minAge > 0 ? filed.withMinAge(minAge) : filed;
+        }
     }
 }

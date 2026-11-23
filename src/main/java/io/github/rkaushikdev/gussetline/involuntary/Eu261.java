@@ -26,7 +26,7 @@ import java.util.Optional;
  *
  * <p>And a third rule halves what the first one produced. A carrier that gets the passenger to the
  * destination within two, three or four hours of the scheduled arrival, by band, pays half. A
- * cancellation notified a week or two ahead and rerouted close enough to the original times owes
+ * cancellation notified a week or two ahead and rerouted close enough to the times booked owes
  * nothing at all, and one notified a fortnight ahead owes nothing whatever the rerouting.
  */
 public final class Eu261 {

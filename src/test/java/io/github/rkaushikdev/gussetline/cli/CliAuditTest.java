@@ -17,6 +17,7 @@ import io.github.rkaushikdev.gussetline.persistence.models.LoadRow;
 import io.github.rkaushikdev.gussetline.tariff.Fare;
 import io.github.rkaushikdev.gussetline.tariff.FareType;
 import io.github.rkaushikdev.gussetline.tariff.OwRt;
+import io.github.rkaushikdev.gussetline.taxes.AppliedTax;
 import java.nio.file.Path;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -246,5 +247,49 @@ class CliAuditTest {
     @Test
     void summarisingNothingGivesNothing() {
         assertThat(AuditCommand.summarise(List.of())).isEmpty();
+    }
+
+    /** The default offer, charged the German taxes and the fuel surcharge but not the US arrival tax. */
+    private static Offer taxedOffer() {
+        return Offer.builder()
+                .source("gds")
+                .itinerary(new Itinerary(
+                        List.of(segment("LH", "400", "FRA", "JFK", "2025-08-04 10:25", "2025-08-04 13:05"))))
+                .breakdown(new PriceBreakdown(
+                        Money.of("620.00", "EUR"),
+                        List.of(
+                                AppliedTax.asSent("DE", Money.of("70.83", "EUR"), "FRA"),
+                                AppliedTax.asSent("RA", Money.of("10.00", "EUR"), "FRA"),
+                                AppliedTax.asSent("YQ", Money.of("180.00", "EUR"), ""))))
+                .fareBases(List.of("KOW"))
+                .observedAt(SEEN)
+                .validatingCarrier("LH")
+                .build();
+    }
+
+    @Test
+    void checkingTaxesNamesTheCodeASupplierLeftOut() {
+        store(env, List.of(taxedOffer()), List.of(fare("620.00")));
+        Shell.Result reply = runner.run("audit", "--on", TODAY, "--since", "2025-07-01", "--check-taxes");
+        assertThat(reply.code()).isZero();
+        assertThat(reply.output()).contains("1 offers with a tax out against the filing", "1  US not charged");
+        assertThat(reply.output()).doesNotContain("agreed          1");
+    }
+
+    @Test
+    void withoutTheOptionTheTaxesAreNotChecked() {
+        store(env, List.of(taxedOffer()), List.of(fare("620.00")));
+        Shell.Result reply = runner.run("audit", "--on", TODAY, "--since", "2025-07-01");
+        assertThat(reply.output()).contains("agreed          1");
+        assertThat(reply.output()).doesNotContain("with a tax out");
+    }
+
+    @Test
+    void anOfferWithNoTaxesIsOutOnEveryFiledCode() {
+        store(env, List.of(offer("620.00")), List.of(fare("620.00")));
+        Shell.Result reply = runner.run("audit", "--on", TODAY, "--since", "2025-07-01", "--check-taxes");
+        // The bare offer charges no tax at all, so every filed code is out against it.
+        assertThat(reply.output())
+                .contains("1 offers with a tax out against the filing", "DE not charged", "RA not charged");
     }
 }

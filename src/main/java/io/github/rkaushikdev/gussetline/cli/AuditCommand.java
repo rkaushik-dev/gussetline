@@ -3,6 +3,7 @@ package io.github.rkaushikdev.gussetline.cli;
 import io.github.rkaushikdev.gussetline.GussetlineError;
 import io.github.rkaushikdev.gussetline.audit.Audit;
 import io.github.rkaushikdev.gussetline.audit.Finding;
+import io.github.rkaushikdev.gussetline.audit.TaxCheck;
 import io.github.rkaushikdev.gussetline.engine.Tariffs;
 import io.github.rkaushikdev.gussetline.exchange.Converter;
 import io.github.rkaushikdev.gussetline.exchange.Exchange;
@@ -10,6 +11,8 @@ import io.github.rkaushikdev.gussetline.offers.Offer;
 import io.github.rkaushikdev.gussetline.persistence.Snapshot;
 import io.github.rkaushikdev.gussetline.persistence.UnitOfWork;
 import io.github.rkaushikdev.gussetline.reports.Discrepancy;
+import io.github.rkaushikdev.gussetline.taxes.TaxTable;
+import io.github.rkaushikdev.gussetline.taxes.Taxes;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -69,6 +72,11 @@ final class AuditCommand implements DeskCommand {
             description = "How many cases to print.")
     private int show = 10;
 
+    @Option(
+            names = "--check-taxes",
+            description = "Check every offer's taxes, code by code, against the taxes the desk has filed.")
+    private boolean checkTaxes;
+
     private final Desk desk;
 
     AuditCommand(Desk desk) {
@@ -106,11 +114,13 @@ final class AuditCommand implements DeskCommand {
         }
         Converter converter = new Converter(Exchange.defaultRoeTable());
 
+        TaxTable filed = Taxes.defaultTaxTable();
         List<Audit> audits = new ArrayList<>();
         List<Unpriceable> unpriceable = new ArrayList<>();
         for (Offer offer : offers) {
             try {
-                audits.add(Audit.audit(offer, tariffs, converter, when));
+                Audit audited = Audit.audit(offer, tariffs, converter, when);
+                audits.add(checkTaxes ? audited.withTaxesChecked(filed, converter, when) : audited);
             } catch (GussetlineError refused) {
                 unpriceable.add(new Unpriceable(offer, refused.message()));
             }
@@ -120,7 +130,31 @@ final class AuditCommand implements DeskCommand {
         desk.say("");
         desk.say(Discrepancy.render(report, show));
         ourGaps(unpriceable);
+        if (checkTaxes) {
+            taxesOut(offers, filed, converter, when);
+        }
         return Desk.OK;
+    }
+
+    /**
+     * The tax codes suppliers charged differently from the filing, the commonest first, each with how
+     * many offers had it out. A code missing from an offer and a code nothing files are told apart,
+     * because the first is the supplier's to fix and the second is usually ours.
+     */
+    private void taxesOut(List<Offer> offers, TaxTable filed, Converter converter, LocalDate when) {
+        Map<String, Integer> codes = new LinkedHashMap<>();
+        int out = 0;
+        for (Offer offer : offers) {
+            List<TaxCheck> checks = Audit.checkTaxes(offer, filed, converter, when);
+            out += checks.isEmpty() ? 0 : 1;
+            for (TaxCheck check : checks) {
+                String kind = check.missing() ? "not charged" : check.unfiled() ? "not filed" : "charged differently";
+                codes.merge(check.code() + " " + kind, 1, Integer::sum);
+            }
+        }
+        desk.say("");
+        desk.say(out + " offers with a tax out against the filing");
+        counted(codes);
     }
 
     /** The offers we could not price, which are a reading about us: each reason, the commonest first. */
@@ -131,16 +165,19 @@ final class AuditCommand implements DeskCommand {
         desk.say("");
         desk.say(unpriceable.size() + " offers the tariff could not price, which is ours to fix");
         Map<String, Integer> reasons = new LinkedHashMap<>();
-        for (Unpriceable gap : unpriceable) {
-            reasons.merge(gap.reason(), 1, Integer::sum);
-        }
+        unpriceable.forEach(gap -> reasons.merge(gap.reason(), 1, Integer::sum));
+        counted(reasons);
+    }
+
+    /** Each reading and how often it came up, the commonest first, cut to {@code --show}. */
+    private void counted(Map<String, Integer> readings) {
         // A negative number leaves that many off the end.
-        int shown = show >= 0 ? show : Math.max(0, reasons.size() + show);
-        reasons.entrySet().stream()
+        int shown = show >= 0 ? show : Math.max(0, readings.size() + show);
+        readings.entrySet().stream()
                 .sorted(Map.Entry.<String, Integer>comparingByValue().reversed())
                 .limit(shown)
-                .forEach(reason ->
-                        desk.say(String.format(Locale.ROOT, "  %5d  %s", reason.getValue(), reason.getKey())));
+                .forEach(reading ->
+                        desk.say(String.format(Locale.ROOT, "  %5d  %s", reading.getValue(), reading.getKey())));
     }
 
     /**
@@ -149,10 +186,8 @@ final class AuditCommand implements DeskCommand {
      */
     static Map<String, Integer> summarise(List<Audit> audits) {
         Map<String, Integer> counts = new LinkedHashMap<>();
-        for (Audit item : audits) {
-            String key = item.finding() != Finding.AGREES ? item.finding().value() : "agreed";
-            counts.merge(key, 1, Integer::sum);
-        }
+        audits.forEach(item -> counts.merge(
+                item.finding() == Finding.AGREES ? "agreed" : item.finding().value(), 1, Integer::sum));
         return Collections.unmodifiableMap(counts);
     }
 }

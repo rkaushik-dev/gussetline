@@ -24,6 +24,9 @@ import io.github.rkaushikdev.gussetline.offers.Offer;
 import io.github.rkaushikdev.gussetline.offers.PriceBreakdown;
 import io.github.rkaushikdev.gussetline.tariff.TariffStore;
 import io.github.rkaushikdev.gussetline.taxes.AppliedTax;
+import io.github.rkaushikdev.gussetline.taxes.Applies;
+import io.github.rkaushikdev.gussetline.taxes.TaxRule;
+import io.github.rkaushikdev.gussetline.taxes.TaxTable;
 import io.github.rkaushikdev.gussetline.trace.Stage;
 import io.github.rkaushikdev.gussetline.trace.Step;
 import io.github.rkaushikdev.gussetline.trace.Trace;
@@ -260,5 +263,93 @@ class AuditTest {
         assertThat(result.priced()).isPresent();
         assertThat(result.priced().get().totalNuc()).isEqualByComparingTo("840.00");
         assertThat(result.priced().get().line()).contains("NUC840.00END");
+    }
+
+    /** The German transport tax alone, owed once on a Frankfurt round trip. */
+    private static TaxTable germanTax() {
+        TaxTable table = new TaxTable();
+        table.add(TaxRule.builder("DE", "DE")
+                .flat("70.83", "EUR")
+                .applies(Applies.PER_INTERNATIONAL_DEPARTURE)
+                .build());
+        return table;
+    }
+
+    private static AppliedTax charged(String code, String amount) {
+        return AppliedTax.asSent(code, Money.of(amount, "EUR"), "");
+    }
+
+    private static Offer taxed(String base, AppliedTax... taxes) {
+        return anOffer(base, List.of(taxes), Optional.empty(), trip());
+    }
+
+    @Test
+    void taxesThatMatchTheFilingLeaveTheAuditAsItWas() {
+        Offer offer = taxed("840.00", charged("DE", "70.83"));
+        Audit agreed = audit(offer, tariffs, flatConverter, TICKETING);
+        assertThat(Audit.checkTaxes(offer, germanTax(), flatConverter, TICKETING))
+                .isEmpty();
+        assertThat(agreed.withTaxesChecked(germanTax(), flatConverter, TICKETING))
+                .isSameAs(agreed);
+    }
+
+    @Test
+    void anAgreedBaseWithATaxOutIsATaxDifference() {
+        Offer offer = taxed("840.00", charged("DE", "60.83"));
+        Audit checked =
+                audit(offer, tariffs, flatConverter, TICKETING).withTaxesChecked(germanTax(), flatConverter, TICKETING);
+        assertThat(checked.finding()).isSameAs(Finding.TAX_DIFFERENCE);
+        assertThat(checked.reasons()).containsExactly("DE theirs 60.83 EUR, ours 70.83 EUR");
+        TaxCheck check =
+                Audit.checkTaxes(offer, germanTax(), flatConverter, TICKETING).get(0);
+        assertThat(check.difference()).isEqualTo(Money.of("-10.00", "EUR"));
+    }
+
+    @Test
+    void aTaxTheSupplierLeftOutIsNamedAsMissing() {
+        List<TaxCheck> checks = Audit.checkTaxes(taxed("840.00"), germanTax(), flatConverter, TICKETING);
+        assertThat(checks).hasSize(1);
+        assertThat(checks.get(0).missing()).isTrue();
+        assertThat(checks.get(0).unfiled()).isFalse();
+        assertThat(checks.get(0)).hasToString("DE not charged, ours 70.83 EUR");
+    }
+
+    @Test
+    void aTaxNothingFiledIsNamedAsUnfiled() {
+        List<TaxCheck> checks = Audit.checkTaxes(
+                taxed("840.00", charged("DE", "70.83"), charged("XX", "12.00")), germanTax(), flatConverter, TICKETING);
+        assertThat(checks).extracting(TaxCheck::code).containsExactly("XX");
+        assertThat(checks.get(0).unfiled()).isTrue();
+        assertThat(checks.get(0)).hasToString("XX charged at 12.00 EUR and not filed");
+    }
+
+    @Test
+    void carrierMoneyIsNotCheckedAgainstAnyFiling() {
+        Offer offer = taxed("840.00", charged("DE", "70.83"), charged("YQ", "300.00"));
+        assertThat(Audit.checkTaxes(offer, germanTax(), flatConverter, TICKETING))
+                .isEmpty();
+    }
+
+    @Test
+    void aTaxOutByLessThanOneUnitIsNotATaxDifference() {
+        Offer offer = taxed("840.00", charged("DE", "70.33"));
+        assertThat(Audit.checkTaxes(offer, germanTax(), flatConverter, TICKETING))
+                .isEmpty();
+    }
+
+    @Test
+    void twoChargesUnderOneCodeAreComparedTogether() {
+        Offer offer = taxed("840.00", charged("DE", "35.00"), charged("DE", "35.83"));
+        assertThat(Audit.checkTaxes(offer, germanTax(), flatConverter, TICKETING))
+                .isEmpty();
+    }
+
+    @Test
+    void aHighSupplierStaysAClaimAndGainsTheTaxReasons() {
+        Offer offer = taxed("900.00", charged("DE", "60.83"));
+        Audit checked =
+                audit(offer, tariffs, flatConverter, TICKETING).withTaxesChecked(germanTax(), flatConverter, TICKETING);
+        assertThat(checked.finding()).isSameAs(Finding.SUPPLIER_HIGH);
+        assertThat(checked.reasons()).contains("DE theirs 60.83 EUR, ours 70.83 EUR");
     }
 }

@@ -9,18 +9,24 @@ import io.github.rkaushikdev.gussetline.exchange.Converter;
 import io.github.rkaushikdev.gussetline.fcl.Fcl;
 import io.github.rkaushikdev.gussetline.money.Money;
 import io.github.rkaushikdev.gussetline.offers.Offer;
+import io.github.rkaushikdev.gussetline.taxes.AppliedTax;
+import io.github.rkaushikdev.gussetline.taxes.TaxTable;
+import io.github.rkaushikdev.gussetline.taxes.Taxes;
 import io.github.rkaushikdev.gussetline.trace.Stage;
 import io.github.rkaushikdev.gussetline.trace.Trace;
 import io.github.rkaushikdev.gussetline.trace.Verdict;
 import io.github.rkaushikdev.gussetline.util.Text;
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.TreeSet;
 
 /**
  * One offer, repriced from the tariff, with the disagreement named.
@@ -188,22 +194,68 @@ public record Audit(
      * @throws io.github.rkaushikdev.gussetline.ValidationError when a claim is in another currency
      */
     public static Money recoveredTotal(List<Audit> audits, String currency) {
-        Money running = Money.zero(currency);
-        for (Audit item : audits) {
-            if (item.claimable()) {
-                running = running.plus(item.recovered());
-            }
-        }
-        return running;
+        return audits.stream().filter(Audit::claimable).map(Audit::recovered).reduce(Money.zero(currency), Money::plus);
     }
 
     /** How a run came out, which is the first line of the daily report: each finding's name and count, in the order first met. */
     public static Map<String, Integer> byFinding(List<Audit> audits) {
         Map<String, Integer> counts = new LinkedHashMap<>();
-        for (Audit item : audits) {
-            counts.merge(item.finding().value(), 1, Integer::sum);
-        }
+        audits.forEach(item -> counts.merge(item.finding().value(), 1, Integer::sum));
         return Collections.unmodifiableMap(counts);
+    }
+
+    /**
+     * Every tax code the supplier charged differently from the filing by at least {@link #MATERIAL},
+     * sorted by code. Empty when the taxes agree.
+     *
+     * <p>Compared code by code and not point by point, because a supplier that sends points at all
+     * sends its own spelling of them. Our side is assessed on the supplier's own base fare, since a
+     * percentage tax is owed on the fare that was charged, and restated into the offer's currency on
+     * the bankers rate ({@link Taxes#inCurrency}). Carrier money is left out on both sides: YQ and
+     * YR are the carrier's to set, and a filing the desk holds for them says nothing about this
+     * carrier's.
+     *
+     * @throws io.github.rkaushikdev.gussetline.ValidationError when the bankers table holds no rate
+     *     for a filed tax on the date
+     */
+    public static List<TaxCheck> checkTaxes(Offer offer, TaxTable table, Converter converter, LocalDate on) {
+        String currency = offer.currency();
+        List<AppliedTax> owed = Taxes.inCurrency(
+                Taxes.assess(offer.itinerary(), offer.breakdown().base(), table), currency, converter, on);
+        Map<String, Money> ours = byCode(owed, currency);
+        Map<String, Money> theirs = byCode(offer.breakdown().taxes(), currency);
+        TreeSet<String> codes = new TreeSet<>(ours.keySet());
+        codes.addAll(theirs.keySet());
+        Money zero = Money.zero(currency);
+        return codes.stream()
+                .map(code -> new TaxCheck(code, ours.getOrDefault(code, zero), theirs.getOrDefault(code, zero)))
+                .filter(check -> check.difference().abs().amount().compareTo(MATERIAL) >= 0)
+                .toList();
+    }
+
+    /**
+     * The same audit with the supplier's taxes checked against the filing. An audit that agreed on
+     * the base fare and finds a tax code out by a material amount becomes a {@link
+     * Finding#TAX_DIFFERENCE}, each disagreeing code given as a reason; any other finding keeps its
+     * class and gains the reasons.
+     */
+    public Audit withTaxesChecked(TaxTable table, Converter converter, LocalDate on) {
+        List<TaxCheck> checks = checkTaxes(offer, table, converter, on);
+        if (checks.isEmpty()) {
+            return this;
+        }
+        List<String> found = new ArrayList<>(reasons);
+        checks.forEach(check -> found.add(check.toString()));
+        Finding becomes = finding == Finding.AGREES ? Finding.TAX_DIFFERENCE : finding;
+        return new Audit(offer, becomes, ours, theirs, difference, lineDifferences, found, priced);
+    }
+
+    private static Map<String, Money> byCode(List<AppliedTax> taxes, String currency) {
+        Map<String, Money> totals = new HashMap<>();
+        taxes.stream()
+                .filter(tax -> !tax.carrierImposed())
+                .forEach(tax -> totals.merge(tax.code(), tax.amount(), Money::plus));
+        return totals;
     }
 
     /** Whether the gap is worth anybody's time: at least {@link #MATERIAL} either way. */

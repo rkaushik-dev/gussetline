@@ -413,11 +413,11 @@ class TaxesTest {
                 assess(london, Money.of("500", "EUR"), defaultTaxTable(), new Passenger(PassengerType.CHILD)).stream()
                         .map(AppliedTax::code)
                         .toList();
-        assertThat(child).containsExactlyInAnyOrder("UB", "YQ");
+        assertThat(child).containsExactlyInAnyOrder("UB", "US", "YQ");
         List<String> adult = assess(london, Money.of("500", "EUR"), defaultTaxTable()).stream()
                 .map(AppliedTax::code)
                 .toList();
-        assertThat(adult).containsExactlyInAnyOrder("GB", "UB", "YQ");
+        assertThat(adult).containsExactlyInAnyOrder("GB", "UB", "US", "YQ");
     }
 
     @Test
@@ -486,12 +486,13 @@ class TaxesTest {
         assertThat(carrierTotal(List.of(), "EUR")).isEqualTo(Money.zero("EUR"));
     }
 
-    /** Sterling at four fifths of a neutral unit and the euro at one, on the bankers rate only. */
+    /** Sterling at four fifths of a neutral unit on the bankers rate, the euro and the dollar at one. */
     private static Converter bankers() {
         RateTable roe = new RateTable("roe");
         RateTable bsr = new RateTable("bsr");
         for (RateTable table : List.of(roe, bsr)) {
             table.add("EUR", LocalDate.of(2025, 1, 1), "1.000");
+            table.add("USD", LocalDate.of(2025, 1, 1), "1.000");
         }
         roe.add("GBP", LocalDate.of(2025, 1, 1), "0.900");
         bsr.add("GBP", LocalDate.of(2025, 1, 1), "0.800");
@@ -529,11 +530,12 @@ class TaxesTest {
                 new Passenger(PassengerType.ADULT),
                 bankers(),
                 LocalDate.of(2025, 3, 1));
-        assertThat(quoted.taxCodes()).containsExactly("DE", "GB", "RA", "UB", "YQ");
-        // 70.83 + 10.00 in euro, then 88.00 and 31.30 sterling at 0.8: 110.00 and 39.13 (39.125 up).
-        assertThat(quoted.taxTotal()).isEqualTo(Money.of("229.96", "EUR"));
+        assertThat(quoted.taxCodes()).containsExactly("DE", "GB", "RA", "UB", "US", "YQ");
+        // 70.83 + 10.00 in euro, then 88.00 and 31.30 sterling at 0.8: 110.00 and 39.13 (39.125 up),
+        // and the 22.90 dollar arrival tax at par.
+        assertThat(quoted.taxTotal()).isEqualTo(Money.of("252.86", "EUR"));
         assertThat(quoted.surchargeTotal()).isEqualTo(Money.of("180.00", "EUR"));
-        assertThat(quoted.computedTotal()).isEqualTo(Money.of("909.96", "EUR"));
+        assertThat(quoted.computedTotal()).isEqualTo(Money.of("932.86", "EUR"));
     }
 
     @Test
@@ -560,6 +562,51 @@ class TaxesTest {
                 .isFalse();
     }
 
+    private static List<String> described(Itinerary journey) {
+        return assess(journey, Money.of("500", "USD"), defaultTaxTable()).stream()
+                .filter(tax -> tax.code().equals("US"))
+                .map(tax -> tax.description() + " at " + tax.point() + " " + tax.amount())
+                .toList();
+    }
+
+    @Test
+    void aDomesticJourneyOwesThePercentageAndNoBorderTax() {
+        Itinerary domestic = new Itinerary(List.of(
+                segment("UA", "100", "ORD", "DEN", "2025-03-04 06:00", "2025-03-04 08:00"),
+                segment("UA", "200", "DEN", "LAX", "2025-03-04 09:30", "2025-03-04 11:00")));
+        assertThat(described(domestic)).containsExactly("US transportation tax at ORD 37.50 USD");
+    }
+
+    @Test
+    void anInternationalJourneyOwesTheBorderTaxAndNoPercentage() {
+        Itinerary leaving =
+                new Itinerary(List.of(segment("LH", "401", "JFK", "FRA", "2025-03-18 18:30", "2025-03-19 08:05")));
+        assertThat(described(leaving)).containsExactly("US international departure tax at JFK 22.90 USD");
+    }
+
+    @Test
+    void anInternationalArrivalIsOwedAtTheBorderAndNotAtTheDomesticConnection() {
+        Itinerary through = new Itinerary(List.of(
+                segment("LH", "400", "FRA", "JFK", "2025-03-04 10:25", "2025-03-04 13:05"),
+                segment("UA", "300", "JFK", "LAX", "2025-03-04 15:30", "2025-03-04 18:45")));
+        assertThat(described(through)).containsExactly("US international arrival tax at JFK 22.90 USD");
+    }
+
+    @Test
+    void aRuleHeldToOneKindOfJourneyIsADifferentRule() {
+        TaxRule any = TaxRule.builder("US", "US").flat("1.00", "USD").build();
+        TaxRule domestic = TaxRule.builder("US", "US")
+                .flat("1.00", "USD")
+                .journeys(Journeys.DOMESTIC)
+                .build();
+        assertThat(any.journeys()).isSameAs(Journeys.ANY);
+        assertThat(domestic).isNotEqualTo(any);
+        assertThat(Journeys.ANY.reads(true)).isTrue();
+        assertThat(Journeys.DOMESTIC.reads(true)).isFalse();
+        assertThat(Journeys.INTERNATIONAL.reads(false)).isFalse();
+        assertThat(Applies.of("per_international_arrival")).isSameAs(Applies.PER_INTERNATIONAL_ARRIVAL);
+    }
+
     @Test
     void anAppliedTaxReadsBackAsCodeAndAmount() {
         AppliedTax applied = new AppliedTax("DE", Money.of("70.83", "EUR"), "FRA");
@@ -578,7 +625,7 @@ class TaxesTest {
     void theShippedTablePricesAFrankfurtDeparture() {
         List<AppliedTax> owed = assess(oneWay(), Money.of("500", "EUR"), defaultTaxTable());
         List<String> codes = owed.stream().map(AppliedTax::code).sorted().toList();
-        assertThat(codes).containsExactly("DE", "RA", "YQ");
+        assertThat(codes).containsExactly("DE", "RA", "US", "YQ");
     }
 
     /** A tax rule built from the German transport tax, one field changed at a time. */

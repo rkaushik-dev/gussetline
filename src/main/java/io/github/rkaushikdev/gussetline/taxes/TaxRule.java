@@ -29,6 +29,7 @@ import java.util.regex.Pattern;
  *     country caps it; a one way is all one direction
  * @param exemptPassengers the passenger types spared it whatever the journey does, such as an infant
  *     on a lap that takes no seat
+ * @param journeys whether it is owed on every journey, or only a domestic or an international one
  * @param transitHours the longest break a passenger is still connecting through for this tax, in
  *     hours; read in place of the journey's stopover line, so a country can spare a longer wait than
  *     the fare does or a shorter one
@@ -44,7 +45,8 @@ public record TaxRule(
         boolean exemptTransit,
         int transitHours,
         Optional<Integer> maxPerDirection,
-        Set<PassengerType> exemptPassengers) {
+        Set<PassengerType> exemptPassengers,
+        Journeys journeys) {
 
     /** The break a transit exemption allows unless the filing says otherwise, in hours. */
     public static final int DEFAULT_TRANSIT_HOURS = 24;
@@ -67,6 +69,7 @@ public record TaxRule(
         Objects.requireNonNull(applies, "applies");
         Objects.requireNonNull(maxPerDirection, "maxPerDirection");
         exemptPassengers = Set.copyOf(exemptPassengers);
+        Objects.requireNonNull(journeys, "journeys");
         code = Text.code(code);
         country = Text.code(country);
         if (!CODE.matcher(code).matches()) {
@@ -121,7 +124,8 @@ public record TaxRule(
                 && exemptTransit == that.exemptTransit
                 && transitHours == that.transitHours
                 && maxPerDirection.equals(that.maxPerDirection)
-                && exemptPassengers.equals(that.exemptPassengers);
+                && exemptPassengers.equals(that.exemptPassengers)
+                && journeys == that.journeys;
     }
 
     @Override
@@ -137,7 +141,8 @@ public record TaxRule(
                 exemptTransit,
                 transitHours,
                 maxPerDirection,
-                exemptPassengers);
+                exemptPassengers,
+                journeys);
     }
 
     /**
@@ -157,6 +162,7 @@ public record TaxRule(
         private int transitHours = DEFAULT_TRANSIT_HOURS;
         private Optional<Integer> maxPerDirection = Optional.empty();
         private final EnumSet<PassengerType> exemptPassengers = EnumSet.noneOf(PassengerType.class);
+        private Journeys journeys = Journeys.ANY;
 
         private Builder(String code, String country) {
             this.code = code;
@@ -214,6 +220,12 @@ public record TaxRule(
             return this;
         }
 
+        /** Owe the tax only on the journeys named. */
+        public Builder journeys(Journeys kind) {
+            this.journeys = Objects.requireNonNull(kind, "journeys");
+            return this;
+        }
+
         /**
          * The filing.
          *
@@ -232,7 +244,8 @@ public record TaxRule(
                     exemptTransit,
                     transitHours,
                     maxPerDirection,
-                    exemptPassengers);
+                    exemptPassengers,
+                    journeys);
         }
     }
 }

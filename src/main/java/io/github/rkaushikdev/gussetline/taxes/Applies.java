@@ -13,7 +13,9 @@ public enum Applies {
     /** At every point a passenger arrives at in the filing country. */
     PER_ARRIVAL("per_arrival"),
     /** At every departure from the filing country to another one. */
-    PER_INTERNATIONAL_DEPARTURE("per_international_departure");
+    PER_INTERNATIONAL_DEPARTURE("per_international_departure"),
+    /** At every arrival into the filing country from another one. */
+    PER_INTERNATIONAL_ARRIVAL("per_international_arrival");
 
     private final String value;
 

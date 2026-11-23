@@ -63,7 +63,9 @@ public final class Taxes {
      * Work out every tax and surcharge owed on a journey.
      *
      * <p>The itinerary is walked point by point rather than country by country, because a tax is owed
-     * at a point and the same country can be entered twice on one journey and owe twice. Departure
+     * at a point and the same country can be entered twice on one journey and owe twice. A rule held
+     * to domestic or international journeys ({@link TaxRule#journeys()}) is not read on the other
+     * kind at all. Departure
      * and arrival taxes come first, flown sector by flown sector, because nobody boards or lands on a
      * surface sector; then the taxes owed once per ticket and once
      * per coupon in the country the journey starts in; then the carrier surcharges, at the origin.
@@ -89,7 +91,7 @@ public final class Taxes {
      * sense a facility charge means and owes none of it, however many airports the parent passes.
      */
     public static List<AppliedTax> assess(Itinerary itinerary, Money base, TaxTable table, Passenger passenger) {
-        Charges owed = new Charges(base, itinerary.turnaroundIndex(), passenger.kind());
+        Charges owed = new Charges(base, itinerary.turnaroundIndex(), passenger.kind(), itinerary.isInternational());
         List<Element> elements = itinerary.elements();
         List<Break> breaks = itinerary.breaks();
 
@@ -105,19 +107,12 @@ public final class Taxes {
                     index == elements.size() - 1 ? Optional.empty() : flownBreak(elements, breaks, index);
 
             for (TaxRule rule : table.forCountry(Geography.airportOrCityCountry(departing))) {
-                boolean due =
-                        switch (rule.applies()) {
-                            case PER_DEPARTURE -> true;
-                            case PER_INTERNATIONAL_DEPARTURE -> !Geography.sameCountry(departing, arriving);
-                            default -> false;
-                        };
-                if (due && !inTransit(rule, before)) {
+                if (dueOn(rule, element, true) && !inTransit(rule, before)) {
                     owed.charge(rule, departing, index);
                 }
             }
-
             for (TaxRule rule : table.forCountry(Geography.airportOrCityCountry(arriving))) {
-                if (rule.applies() == Applies.PER_ARRIVAL && !inTransit(rule, after)) {
+                if (dueOn(rule, element, false) && !inTransit(rule, after)) {
                     owed.charge(rule, arriving, index);
                 }
             }
@@ -225,6 +220,19 @@ public final class Taxes {
                 TaxRule.builder("US", "US")
                         .description("US transportation tax")
                         .percentOfBase("7.5", "USD")
+                        .journeys(Journeys.DOMESTIC)
+                        .build(),
+                TaxRule.builder("US", "US")
+                        .description("US international departure tax")
+                        .flat("22.90", "USD")
+                        .applies(Applies.PER_INTERNATIONAL_DEPARTURE)
+                        .journeys(Journeys.INTERNATIONAL)
+                        .build(),
+                TaxRule.builder("US", "US")
+                        .description("US international arrival tax")
+                        .flat("22.90", "USD")
+                        .applies(Applies.PER_INTERNATIONAL_ARRIVAL)
+                        .journeys(Journeys.INTERNATIONAL)
                         .build(),
                 TaxRule.builder("ZP", "US")
                         .description("US flight segment tax")
@@ -263,6 +271,21 @@ public final class Taxes {
                         .flat("180.00", "EUR")
                         .build()));
         return table;
+    }
+
+    /**
+     * Whether a sector owes a rule at one of its ends: on leaving for the departure kinds, on landing
+     * for the arrival kinds, and for the international ones only when the sector crosses a border.
+     */
+    private static boolean dueOn(TaxRule rule, Element sector, boolean leaving) {
+        boolean crossing = !Geography.sameCountry(sector.origin(), sector.destination());
+        return switch (rule.applies()) {
+            case PER_DEPARTURE -> leaving;
+            case PER_INTERNATIONAL_DEPARTURE -> leaving && crossing;
+            case PER_ARRIVAL -> !leaving;
+            case PER_INTERNATIONAL_ARRIVAL -> !leaving && crossing;
+            case PER_TICKET, PER_COUPON -> false;
+        };
     }
 
     /**
@@ -314,17 +337,19 @@ public final class Taxes {
         private final Money base;
         private final int turnaround;
         private final PassengerType passenger;
+        private final boolean international;
         private final List<AppliedTax> owed = new ArrayList<>();
         private final Map<TaxRule, int[]> counted = new HashMap<>();
 
-        Charges(Money base, int turnaround, PassengerType passenger) {
+        Charges(Money base, int turnaround, PassengerType passenger, boolean international) {
             this.base = base;
             this.turnaround = turnaround;
             this.passenger = passenger;
+            this.international = international;
         }
 
         void charge(TaxRule rule, String point, int element) {
-            if (rule.spares(passenger)) {
+            if (rule.spares(passenger) || !rule.journeys().reads(international)) {
                 return;
             }
             int[] times = counted.computeIfAbsent(rule, unused -> new int[2]);

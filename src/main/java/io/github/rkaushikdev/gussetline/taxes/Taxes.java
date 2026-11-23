@@ -11,7 +11,9 @@ import io.github.rkaushikdev.gussetline.util.Numbers;
 import java.math.BigDecimal;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
@@ -42,6 +44,12 @@ public final class Taxes {
      */
     public static final int PFC_TRANSIT_HOURS = 4;
 
+    /**
+     * How many facility charges one direction of a journey pays, however many United States airports
+     * it enplanes at: two on a one way, four on a round trip.
+     */
+    public static final int PFC_PER_DIRECTION = 2;
+
     private static final BigDecimal HUNDRED = BigDecimal.valueOf(100);
 
     private Taxes() {}
@@ -55,6 +63,9 @@ public final class Taxes {
      * surface sector; then the taxes owed once per ticket and once
      * per coupon in the country the journey starts in; then the carrier surcharges, at the origin.
      *
+     * <p>A rule capped per direction ({@link TaxRule#maxPerDirection()}) is charged at the first
+     * points that owe it, up to the cap, on the way out and again on the way home.
+     *
      * <p>A flat tax is charged in its filed currency and a percentage tax in the base fare's, each
      * rounded to the minor unit with halves away from zero ({@link Money#roundTax}).
      *
@@ -64,7 +75,7 @@ public final class Taxes {
      * @throws ValidationError when the itinerary's breaks cannot be read
      */
     public static List<AppliedTax> assess(Itinerary itinerary, Money base, TaxTable table) {
-        List<AppliedTax> owed = new ArrayList<>();
+        Charges owed = new Charges(base, itinerary.turnaroundIndex());
         List<Element> elements = itinerary.elements();
         List<Break> breaks = itinerary.breaks();
 
@@ -87,35 +98,31 @@ public final class Taxes {
                             default -> false;
                         };
                 if (due && !inTransit(rule, before)) {
-                    owed.add(apply(rule, base, departing));
+                    owed.charge(rule, departing, index);
                 }
             }
 
             for (TaxRule rule : table.forCountry(Geography.airportOrCityCountry(arriving))) {
                 if (rule.applies() == Applies.PER_ARRIVAL && !inTransit(rule, after)) {
-                    owed.add(apply(rule, base, arriving));
+                    owed.charge(rule, arriving, index);
                 }
             }
         }
 
-        List<TaxRule> atOrigin = table.forCountry(Geography.airportOrCityCountry(itinerary.origin()));
-        for (TaxRule rule : atOrigin) {
-            if (rule.applies() == Applies.PER_TICKET) {
-                owed.add(apply(rule, base, itinerary.origin()));
-            }
-        }
+        String origin = itinerary.origin();
+        List<TaxRule> atOrigin = table.forCountry(Geography.airportOrCityCountry(origin));
+        atOrigin.stream()
+                .filter(rule -> rule.applies() == Applies.PER_TICKET)
+                .forEach(rule -> owed.charge(rule, origin, 0));
         for (TaxRule rule : atOrigin) {
             if (rule.applies() == Applies.PER_COUPON) {
-                for (Element element : elements) {
-                    owed.add(apply(rule, base, element.origin()));
+                for (int index = 0; index < elements.size(); index++) {
+                    owed.charge(rule, elements.get(index).origin(), index);
                 }
             }
         }
-
-        for (TaxRule rule : table.carrierRules()) {
-            owed.add(apply(rule, base, itinerary.origin()));
-        }
-        return List.copyOf(owed);
+        table.carrierRules().forEach(rule -> owed.charge(rule, origin, 0));
+        return owed.list();
     }
 
     /** Everything the government gets. Carrier surcharges are not in it. Nothing owed is zero. */
@@ -197,15 +204,16 @@ public final class Taxes {
                         "USD",
                         Applies.PER_COUPON),
                 new TaxRule(
-                        "XF",
-                        "US",
-                        "US passenger facility charge",
-                        Basis.FLAT,
-                        new BigDecimal("4.50"),
-                        "USD",
-                        Applies.PER_DEPARTURE,
-                        true,
-                        PFC_TRANSIT_HOURS),
+                                "XF",
+                                "US",
+                                "US passenger facility charge",
+                                Basis.FLAT,
+                                new BigDecimal("4.50"),
+                                "USD",
+                                Applies.PER_DEPARTURE,
+                                true,
+                                PFC_TRANSIT_HOURS)
+                        .withMaxPerDirection(PFC_PER_DIRECTION),
                 new TaxRule(
                         "FR",
                         "FR",
@@ -268,10 +276,6 @@ public final class Taxes {
         return Optional.empty();
     }
 
-    private static AppliedTax apply(TaxRule rule, Money base, String point) {
-        return new AppliedTax(rule.code(), charge(rule, base), point, rule.description(), rule.isCarrierImposed());
-    }
-
     /**
      * A flat amount in its own currency, or the percentage of the base fare: the base times the rate,
      * then divided by a hundred. Rounded as a tax either way.
@@ -282,5 +286,41 @@ public final class Taxes {
         }
         BigDecimal product = base.amount().multiply(rule.amount(), Numbers.CONTEXT);
         return Money.roundTax(new Money(Numbers.divide(product, HUNDRED), base.currency()));
+    }
+
+    /**
+     * What a journey owes so far, counting each rule's charges in each direction so a capped rule
+     * stops being charged once it has been charged enough.
+     *
+     * <p>The direction is read off the turnaround: an element that ends at or before it is on the way
+     * out and anything after it is on the way home.
+     */
+    private static final class Charges {
+
+        private final Money base;
+        private final int turnaround;
+        private final List<AppliedTax> owed = new ArrayList<>();
+        private final Map<TaxRule, int[]> counted = new HashMap<>();
+
+        Charges(Money base, int turnaround) {
+            this.base = base;
+            this.turnaround = turnaround;
+        }
+
+        void charge(TaxRule rule, String point, int element) {
+            int[] times = counted.computeIfAbsent(rule, unused -> new int[2]);
+            int direction = element < turnaround ? 0 : 1;
+            if (rule.maxPerDirection().isPresent()
+                    && times[direction] >= rule.maxPerDirection().get()) {
+                return;
+            }
+            times[direction]++;
+            owed.add(new AppliedTax(
+                    rule.code(), Taxes.charge(rule, base), point, rule.description(), rule.isCarrierImposed()));
+        }
+
+        List<AppliedTax> list() {
+            return List.copyOf(owed);
+        }
     }
 }

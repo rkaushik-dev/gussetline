@@ -254,6 +254,100 @@ class TaxesTest {
         assertThat(pfc.transitHours()).isEqualTo(Taxes.PFC_TRANSIT_HOURS);
     }
 
+    /** Atlanta to San Francisco with half a day in Chicago and in Denver, every break a stopover. */
+    private static Itinerary hoppingWest() {
+        return new Itinerary(List.of(
+                segment("UA", "100", "ATL", "ORD", "2025-03-04 06:00", "2025-03-04 08:00"),
+                segment("UA", "200", "ORD", "DEN", "2025-03-04 20:00", "2025-03-04 21:30"),
+                segment("UA", "300", "DEN", "SFO", "2025-03-05 12:00", "2025-03-05 13:00")));
+    }
+
+    private static TaxRule facilityCharge() {
+        return rule().code("XF")
+                .country("US")
+                .applies(Applies.PER_DEPARTURE)
+                .amount("4.50")
+                .exemptTransit(true)
+                .transitHours(4)
+                .build();
+    }
+
+    @Test
+    void aCappedChargeStopsAtItsCapOnAOneWay() {
+        TaxTable table = new TaxTable();
+        table.add(facilityCharge().withMaxPerDirection(2));
+        assertThat(assess(hoppingWest(), Money.of("500", "EUR"), table))
+                .extracting(AppliedTax::point)
+                .containsExactly("ATL", "ORD");
+        TaxTable uncapped = new TaxTable();
+        uncapped.add(facilityCharge());
+        assertThat(assess(hoppingWest(), Money.of("500", "EUR"), uncapped))
+                .extracting(AppliedTax::point)
+                .containsExactly("ATL", "ORD", "DEN");
+    }
+
+    @Test
+    void theCapStartsAgainOnTheWayHome() {
+        Itinerary roundTrip = new Itinerary(List.of(
+                segment("UA", "100", "ORD", "DEN", "2025-03-04 06:00", "2025-03-04 08:00"),
+                segment("UA", "200", "DEN", "LAX", "2025-03-04 20:00", "2025-03-04 21:30"),
+                segment("UA", "201", "LAX", "DEN", "2025-03-09 07:00", "2025-03-09 10:00"),
+                segment("UA", "101", "DEN", "ORD", "2025-03-09 18:00", "2025-03-09 21:00")));
+        TaxTable once = new TaxTable();
+        once.add(facilityCharge().withMaxPerDirection(1));
+        assertThat(assess(roundTrip, Money.of("500", "EUR"), once))
+                .extracting(AppliedTax::point)
+                .containsExactly("ORD", "LAX");
+        TaxTable twice = new TaxTable();
+        twice.add(facilityCharge().withMaxPerDirection(2));
+        assertThat(assess(roundTrip, Money.of("500", "EUR"), twice))
+                .extracting(AppliedTax::point)
+                .containsExactly("ORD", "DEN", "LAX", "DEN");
+    }
+
+    @Test
+    void aCapAlsoHoldsBackACouponCharge() {
+        TaxTable table = new TaxTable();
+        table.add(rule().code("ZP")
+                .country("US")
+                .applies(Applies.PER_COUPON)
+                .amount("5.00")
+                .build()
+                .withMaxPerDirection(2));
+        assertThat(assess(hoppingWest(), Money.of("500", "EUR"), table))
+                .extracting(AppliedTax::point)
+                .containsExactly("ATL", "ORD");
+    }
+
+    @Test
+    void aCapOfNothingIsRefused() {
+        assertThatThrownBy(() -> facilityCharge().withMaxPerDirection(0))
+                .isInstanceOf(ValidationError.class)
+                .hasMessageContaining("cap");
+    }
+
+    @Test
+    void twoRulesWithDifferentCapsAreDifferentRules() {
+        assertThat(facilityCharge().withMaxPerDirection(2))
+                .isEqualTo(facilityCharge().withMaxPerDirection(2));
+        assertThat(facilityCharge().withMaxPerDirection(2))
+                .hasSameHashCodeAs(facilityCharge().withMaxPerDirection(2));
+        assertThat(facilityCharge().withMaxPerDirection(2)).isNotEqualTo(facilityCharge());
+        assertThat(facilityCharge().withMaxPerDirection(2))
+                .isNotEqualTo(facilityCharge().withMaxPerDirection(4));
+    }
+
+    @Test
+    void theShippedFacilityChargeIsCappedTwiceEachWay() {
+        List<AppliedTax> owed = assess(hoppingWest(), Money.of("500", "EUR"), defaultTaxTable());
+        assertThat(owed.stream().filter(tax -> tax.code().equals("XF")))
+                .extracting(AppliedTax::point)
+                .containsExactly("ATL", "ORD");
+        assertThat(owed.stream().filter(tax -> tax.code().equals("ZP")))
+                .extracting(AppliedTax::point)
+                .containsExactly("ATL", "ORD", "DEN");
+    }
+
     @Test
     void aPercentageTaxReadsTheBaseFare() {
         TaxTable table = new TaxTable();

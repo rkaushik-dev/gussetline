@@ -5,6 +5,7 @@ import io.github.rkaushikdev.gussetline.ValidationError;
 import io.github.rkaushikdev.gussetline.util.Text;
 import java.math.BigDecimal;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.regex.Pattern;
 
 /**
@@ -20,6 +21,8 @@ import java.util.regex.Pattern;
  * @param currency the currency of a flat amount
  * @param applies how many times it is charged
  * @param exemptTransit whether a connecting passenger is spared it
+ * @param maxPerDirection the most times it is charged going out, and again coming home, when the
+ *     country caps it; a one way is all one direction
  * @param transitHours the longest break a passenger is still connecting through for this tax, in
  *     hours; read in place of the journey's stopover line, so a country can spare a longer wait than
  *     the fare does or a shorter one
@@ -33,7 +36,8 @@ public record TaxRule(
         String currency,
         Applies applies,
         boolean exemptTransit,
-        int transitHours) {
+        int transitHours,
+        Optional<Integer> maxPerDirection) {
 
     /** The break a transit exemption allows unless the filing says otherwise, in hours. */
     public static final int DEFAULT_TRANSIT_HOURS = 24;
@@ -54,6 +58,7 @@ public record TaxRule(
         Objects.requireNonNull(amount, "amount");
         Objects.requireNonNull(currency, "currency");
         Objects.requireNonNull(applies, "applies");
+        Objects.requireNonNull(maxPerDirection, "maxPerDirection");
         code = Text.code(code);
         country = Text.code(country);
         if (!CODE.matcher(code).matches()) {
@@ -68,6 +73,34 @@ public record TaxRule(
         if (transitHours < 0) {
             throw new ValidationError("a transit break is not negative", Details.of("code", code));
         }
+        if (maxPerDirection.isPresent() && maxPerDirection.get() < 1) {
+            throw new ValidationError(
+                    "a cap allows at least one charge", Details.of("code", code, "cap", maxPerDirection.get()));
+        }
+    }
+
+    /** A rule over its own transit break, charged as often as the journey owes it. */
+    public TaxRule(
+            String code,
+            String country,
+            String description,
+            Basis basis,
+            BigDecimal amount,
+            String currency,
+            Applies applies,
+            boolean exemptTransit,
+            int transitHours) {
+        this(
+                code,
+                country,
+                description,
+                basis,
+                amount,
+                currency,
+                applies,
+                exemptTransit,
+                transitHours,
+                Optional.empty());
     }
 
     /** A rule with no transit exemption. */
@@ -95,6 +128,21 @@ public record TaxRule(
         this(code, country, description, basis, amount, currency, applies, exemptTransit, DEFAULT_TRANSIT_HOURS);
     }
 
+    /** The same rule, charged at most this many times in each direction. */
+    public TaxRule withMaxPerDirection(int cap) {
+        return new TaxRule(
+                code,
+                country,
+                description,
+                basis,
+                amount,
+                currency,
+                applies,
+                exemptTransit,
+                transitHours,
+                Optional.of(cap));
+    }
+
     /**
      * Whether this is money the carrier keeps rather than a tax: a {@linkplain Taxes#CARRIER_IMPOSED
      * YQ or YR} code filed in the tax box.
@@ -114,7 +162,8 @@ public record TaxRule(
                 && currency.equals(that.currency)
                 && applies == that.applies
                 && exemptTransit == that.exemptTransit
-                && transitHours == that.transitHours;
+                && transitHours == that.transitHours
+                && maxPerDirection.equals(that.maxPerDirection);
     }
 
     @Override
@@ -128,6 +177,7 @@ public record TaxRule(
                 currency,
                 applies,
                 exemptTransit,
-                transitHours);
+                transitHours,
+                maxPerDirection);
     }
 }

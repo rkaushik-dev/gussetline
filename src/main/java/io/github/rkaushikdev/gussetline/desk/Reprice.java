@@ -2,6 +2,8 @@ package io.github.rkaushikdev.gussetline.desk;
 
 import io.github.rkaushikdev.gussetline.Details;
 import io.github.rkaushikdev.gussetline.ValidationError;
+import io.github.rkaushikdev.gussetline.baggage.Allowances;
+import io.github.rkaushikdev.gussetline.baggage.Change;
 import io.github.rkaushikdev.gussetline.money.Money;
 import io.github.rkaushikdev.gussetline.rules.Action;
 import io.github.rkaushikdev.gussetline.rules.Changes;
@@ -39,10 +41,26 @@ public final class Reprice {
 
     private Reprice() {}
 
-    /** {@link #decide(Watch, VoluntaryChange, List, Context, LocalDate, BigDecimal)} at the desk's credit discount. */
+    /** {@link #decide(Watch, Terms, LocalDate, BigDecimal)} at the desk's credit discount. */
     public static Decision decide(
             Watch watch, VoluntaryChange changeRule, List<Penalty> penalties, Context context, LocalDate today) {
-        return decide(watch, changeRule, penalties, context, today, Changes.CREDIT_DISCOUNT);
+        return decide(watch, new Terms(changeRule, penalties, context), today, Changes.CREDIT_DISCOUNT);
+    }
+
+    /** {@link #decide(Watch, Terms, LocalDate, BigDecimal)} with no allowance recorded on the ticket. */
+    public static Decision decide(
+            Watch watch,
+            VoluntaryChange changeRule,
+            List<Penalty> penalties,
+            Context context,
+            LocalDate today,
+            BigDecimal creditDiscount) {
+        return decide(watch, new Terms(changeRule, penalties, context), today, creditDiscount);
+    }
+
+    /** {@link #decide(Watch, Terms, LocalDate, BigDecimal)} at the desk's credit discount. */
+    public static Decision decide(Watch watch, Terms terms, LocalDate today) {
+        return decide(watch, terms, today, Changes.CREDIT_DISCOUNT);
     }
 
     /**
@@ -62,17 +80,19 @@ public final class Reprice {
      * when none is chargeable. The benefit is the drop less the fee; a retained residual comes back as a
      * credit and counts at {@code creditDiscount} of that, to the cent, half to even.
      *
+     * <p>Then the hold. When the terms record what the ticket held carries, the fare offered is
+     * compared with it ({@link Allowances#compare}): checked pieces lost come off the benefit at the
+     * terms' rate per piece, and any other change the passenger would have to be told about is noted.
+     * A hundred euro drop onto a fare with one fewer bag is a saving of about forty, and quoting the
+     * hundred is how a recommendation becomes a complaint.
+     *
      * @param creditDiscount what a credit is worth against cash
      * @throws ValidationError when the fee and the fare are in different currencies, naming the {@code
-     *     fee} and the {@code fare} currency
+     *     fee} and the {@code fare} currency, or the rate per piece is in another currency than the
+     *     fare
      */
-    public static Decision decide(
-            Watch watch,
-            VoluntaryChange changeRule,
-            List<Penalty> penalties,
-            Context context,
-            LocalDate today,
-            BigDecimal creditDiscount) {
+    public static Decision decide(Watch watch, Terms terms, LocalDate today, BigDecimal creditDiscount) {
+        VoluntaryChange changeRule = terms.changeRule();
         if (watch.ticket().isFinished(today)) {
             return new Decision(Verdict.NOTHING_OPEN, watch, Residual.FORFEITED, "every coupon has been used");
         }
@@ -102,11 +122,11 @@ public final class Reprice {
         Observation held = found.get();
 
         String currency = watch.paid().currency();
-        List<Penalty> changes = penalties.stream()
+        List<Penalty> changes = terms.penalties().stream()
                 .filter(penalty -> penalty.action() == Action.CHANGE)
                 .toList();
         Money fee = Penalties.totalPenalty(
-                        changes, context, watch.ticket().coupons().size(), today)
+                        changes, terms.context(), watch.ticket().coupons().size(), today)
                 .orElseGet(() -> Money.zero(currency));
         if (!fee.currency().equals(currency)) {
             throw new ValidationError(
@@ -136,6 +156,17 @@ public final class Reprice {
                     gross.amount().multiply(creditDiscount, Numbers.CONTEXT).setScale(2, RoundingMode.HALF_EVEN),
                     gross.currency());
             notes.add("the residual comes back as a credit and is counted at a discount");
+        }
+        if (terms.carried().isStated()) {
+            Change change = Allowances.compare(terms.carried(), held.baggage());
+            if (change.lostPieces() > 0 && terms.perPiece().isPresent()) {
+                Money lost = Allowances.worthOf(change, terms.perPiece().get());
+                benefit =
+                        Allowances.netBenefit(benefit, change, terms.perPiece().get());
+                notes.add(change + ", worth " + lost);
+            } else if (change.worthSaying()) {
+                notes.add(change.toString());
+            }
         }
 
         if (benefit.isLessThan(watch.threshold())) {
@@ -174,13 +205,10 @@ public final class Reprice {
 
     /** What the actionable decisions are worth together. */
     public static Money totalBenefit(List<Decision> decisions, String currency) {
-        Money running = Money.zero(currency);
-        for (Decision decision : decisions) {
-            if (decision.actionable()) {
-                running = running.plus(decision.worth());
-            }
-        }
-        return running;
+        return decisions.stream()
+                .filter(Decision::actionable)
+                .map(Decision::worth)
+                .reduce(Money.zero(currency), Money::plus);
     }
 
     /** Every watch a decision said will never become actionable, with the reason, in order. */

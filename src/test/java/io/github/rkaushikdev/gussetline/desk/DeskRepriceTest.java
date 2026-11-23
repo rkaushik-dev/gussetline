@@ -13,6 +13,7 @@ import io.github.rkaushikdev.gussetline.ValidationError;
 import io.github.rkaushikdev.gussetline.components.FareComponent;
 import io.github.rkaushikdev.gussetline.itinerary.Itinerary;
 import io.github.rkaushikdev.gussetline.money.Money;
+import io.github.rkaushikdev.gussetline.offers.Baggage;
 import io.github.rkaushikdev.gussetline.rules.Action;
 import io.github.rkaushikdev.gussetline.rules.Applies;
 import io.github.rkaushikdev.gussetline.rules.Context;
@@ -309,5 +310,82 @@ class DeskRepriceTest {
     void aDecisionWithNoBenefitIsWorthNothingRatherThanEmpty() {
         Decision made = new Decision(Verdict.NOT_CHANGEABLE, watch());
         assertThat(made.worth()).isEqualTo(Money.zero("EUR"));
+    }
+
+    /** The usual watch, but every reading came with this allowance. */
+    private static Watch seeing(Baggage allowance, String threshold) {
+        Watch row = Watch.builder()
+                .ticket(ticket())
+                .origin("FRA")
+                .destination("JFK")
+                .departure(DEPARTURE)
+                .threshold(eur(threshold))
+                .hysteresis(2)
+                .build();
+        for (int index = 0; index < SEEN.size(); index++) {
+            row.record(new Observation(LocalDate.of(2025, 6, 18 + index), eur(SEEN.get(index)), "", "", allowance));
+        }
+        return row;
+    }
+
+    private static Terms holding(Baggage carried, String perPiece) {
+        return new Terms(refundable(), List.of(change()), context()).withBaggage(carried, eur(perPiece));
+    }
+
+    @Test
+    void aLostCheckedPieceComesOffTheBenefit() {
+        Decision made = decide(seeing(Baggage.ofPieces(1), "50.00"), holding(Baggage.ofPieces(2), "40.00"), TODAY);
+        assertThat(made.verdict()).isSameAs(Verdict.REISSUE);
+        assertThat(made.benefit()).contains(eur("50.00"));
+        assertThat(made.notes()).containsExactly("2PC to 1PC: 1 fewer checked pieces, worth 40.00 EUR");
+    }
+
+    @Test
+    void aDropThatOnlyPaysForTheLostBagIsNotWorthIt() {
+        Decision made = decide(seeing(Baggage.ofPieces(1), "50.00"), holding(Baggage.ofPieces(2), "60.00"), TODAY);
+        assertThat(made.verdict()).isSameAs(Verdict.NOT_WORTH_IT);
+        assertThat(made.benefit()).contains(eur("30.00"));
+        assertThat(made.reason()).contains("under the 50.00 EUR");
+    }
+
+    @Test
+    void theSameOrALargerAllowanceCostsNothingAndSaysNothing() {
+        Decision same = decide(seeing(Baggage.ofPieces(2), "50.00"), holding(Baggage.ofPieces(2), "40.00"), TODAY);
+        assertThat(same.benefit()).contains(eur("90.00"));
+        assertThat(same.notes()).isEmpty();
+        Decision more = decide(seeing(Baggage.ofPieces(2), "50.00"), holding(Baggage.ofPieces(1), "40.00"), TODAY);
+        assertThat(more.benefit()).contains(eur("90.00"));
+        assertThat(more.notes()).isEmpty();
+    }
+
+    @Test
+    void piecesAgainstWeightIsSaidAndNotPriced() {
+        Decision made = decide(seeing(Baggage.ofKilos(23), "50.00"), holding(Baggage.ofPieces(1), "40.00"), TODAY);
+        assertThat(made.benefit()).contains(eur("90.00"));
+        assertThat(made.notes()).containsExactly("1PC to 23KG: 1PC and 23KG are not the same kind of allowance");
+    }
+
+    @Test
+    void anOfferThatStatesNoAllowanceIsSaidAndNotPriced() {
+        Decision made = decide(seeing(new Baggage(), "50.00"), holding(Baggage.ofPieces(2), "40.00"), TODAY);
+        assertThat(made.benefit()).contains(eur("90.00"));
+        assertThat(made.notes()).containsExactly("2PC to unstated: one of the fares does not state an allowance");
+    }
+
+    @Test
+    void aTicketWithNoAllowanceRecordedIsNotComparedAtAll() {
+        Decision made = decide(
+                seeing(Baggage.ofPieces(1), "50.00"), new Terms(refundable(), List.of(change()), context()), TODAY);
+        assertThat(made.benefit()).contains(eur("90.00"));
+        assertThat(made.notes()).isEmpty();
+    }
+
+    @Test
+    void aRatePerPieceInAnotherCurrencyIsRefused() {
+        Terms dollars = new Terms(refundable(), List.of(change()), context())
+                .withBaggage(Baggage.ofPieces(2), Money.of("40.00", "USD"));
+        assertThatThrownBy(() -> decide(seeing(Baggage.ofPieces(1), "50.00"), dollars, TODAY))
+                .isInstanceOf(ValidationError.class)
+                .hasMessageContaining("one currency");
     }
 }

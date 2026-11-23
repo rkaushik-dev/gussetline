@@ -105,7 +105,7 @@ public final class Session {
             }
 
             Terms terms = rules.apply(watch);
-            Decision decision = Reprice.decide(watch, terms.changeRule(), terms.penalties(), terms.context(), today);
+            Decision decision = Reprice.decide(watch, terms, today);
             night.addDecision(decision);
 
             Optional<Retired> finished = decision.verdict().retiresTheWatch();
